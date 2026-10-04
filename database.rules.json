@@ -1,0 +1,56 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rover": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+
+      "sensors": {
+        "mq2": { ".validate": "newData.isBoolean()" },
+        "mq6": { ".validate": "newData.isBoolean()" },
+        "flame": { ".validate": "newData.isBoolean()" },
+        "distanceFront": { ".validate": "newData.isNumber() || newData.val() === 'no echo'" },
+        "distanceRear": { ".validate": "newData.isNumber() || newData.val() === 'no echo'" },
+        "temperature": { ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 125" },
+        "humidity": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "battery": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "$other": { ".validate": false }
+      },
+
+      "status": {
+        "connected": { ".validate": "newData.isBoolean()" },
+        "lastSeen": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      },
+
+      "detections": {
+        ".validate": "newData.hasChildren(['timestamp', 'frameWidth', 'frameHeight'])",
+        "timestamp": { ".validate": "newData.isNumber()" },
+        "frameWidth": { ".validate": "newData.isNumber() && newData.val() > 0" },
+        "frameHeight": { ".validate": "newData.isNumber() && newData.val() > 0" },
+        "objects": {
+          "$i": {
+            ".validate": "newData.hasChildren(['label', 'confidence', 'bbox'])",
+            "label": { ".validate": "newData.isString() && newData.val().length <= 64" },
+            "confidence": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1" },
+            "bbox": {
+              "$j": { ".validate": "newData.isNumber() && $j.matches(/^[0-3]$/)" }
+            },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
+      },
+
+      "camera": {
+        "streamUrl": { ".validate": "newData.isString() && newData.val().length <= 512" },
+        "$other": { ".validate": false }
+      },
+
+      "history": {
+        ".indexOn": ["timestamp"]
+      }
+    }
+  }
+}

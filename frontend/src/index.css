@@ -1,0 +1,701 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --animate-glow: glow 1.6s ease-in-out infinite;
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 6px -1px rgb(239 68 68 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.08); }
+    50% { box-shadow: 0 0 22px 1px rgb(239 68 68 / 0.75), inset 0 1px 0 rgb(255 255 255 / 0.12); }
+  }
+}
+
+/* Glass "depth" surface used by every dashboard panel. */
+@utility card {
+  position: relative;
+  border-radius: 0.875rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: linear-gradient(160deg, rgb(30 41 59 / 0.72), rgb(15 23 42 / 0.6));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 1rem;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 1px 2px rgb(0 0 0 / 0.4),
+    0 12px 32px -8px rgb(0 0 0 / 0.65),
+    0 30px 60px -30px rgb(16 185 129 / 0.14);
+}
+
+@utility card-alert {
+  border-color: rgb(239 68 68 / 0.55);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 0 0 1px rgb(239 68 68 / 0.25),
+    0 0 36px -6px rgb(239 68 68 / 0.55),
+    0 12px 32px -8px rgb(0 0 0 / 0.65);
+}
+
+/* Pointer-driven tilt; --rx/--ry/--mx/--my are set by useTilt(). */
+@utility tilt {
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 180ms ease-out;
+  will-change: transform;
+}
+
+@layer components {
+  /* Moving specular highlight that follows the pointer on tilted cards. */
+  .tilt-glare::after {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(
+      circle at var(--mx, 50%) var(--my, 0%),
+      rgb(255 255 255 / 0.09),
+      transparent 55%
+    );
+    opacity: var(--glare, 0);
+    transition: opacity 200ms ease-out;
+  }
+
+  /* Fixed backdrop: soft top glow + receding perspective grid "floor". */
+  .app-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse at 50% -10%, rgb(16 185 129 / 0.13), transparent 60%),
+      radial-gradient(ellipse at 100% 100%, rgb(14 165 233 / 0.08), transparent 50%),
+      #050913;
+  }
+  .app-backdrop::after {
+    content: '';
+    position: absolute;
+    left: -50%;
+    right: -50%;
+    bottom: -5%;
+    height: 65%;
+    background-image:
+      linear-gradient(rgb(56 189 248 / 0.13) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(56 189 248 / 0.13) 1px, transparent 1px);
+    background-size: 52px 52px;
+    transform: perspective(520px) rotateX(64deg);
+    transform-origin: bottom center;
+    mask-image: linear-gradient(to top, black 5%, transparent 80%);
+    -webkit-mask-image: linear-gradient(to top, black 5%, transparent 80%);
+  }
+}
+
+/* ── Drive Control ─────────────────────────────────────────────────────────── */
+@layer components {
+  .drive-control {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 20px;
+    border-radius: 16px;
+    border: 1px solid #334155;
+    background: linear-gradient(160deg, #0f172a, #1e293b);
+    backdrop-filter: blur(14px);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.06),
+      0 8px 32px -8px rgb(0 0 0 / 0.7),
+      0 0 0 1px rgb(255 255 255 / 0.03);
+  }
+
+  /* Panel header */
+  .drive-panel-header {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .drive-panel-title {
+    font-size: 0.6rem;
+    font-weight: 900;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #3b82f6;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .drive-panel-title::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 12px;
+    border-radius: 2px;
+    background: linear-gradient(to bottom, #3b82f6, #60a5fa);
+    box-shadow: 0 0 6px #3b82f6;
+  }
+  .drive-status-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+  }
+  .drive-status-dot {
+    flex-shrink: 0;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .drive-status-text {
+    flex: 1;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: #94a3b8;
+  }
+  .drive-dot-ok      { background: #34d399; box-shadow: 0 0 6px #34d399; }
+  .drive-dot-offline { background: #64748b; box-shadow: none; }
+  .drive-dot-driving { background: #34d399; box-shadow: 0 0 10px #34d399; animation: drive-pulse 0.9s ease-in-out infinite; }
+  .drive-dot-estop   { background: #f87171; box-shadow: 0 0 12px #ef4444; animation: estop-pulse 0.8s ease-in-out infinite; }
+
+  @keyframes drive-pulse {
+    0%, 100% { box-shadow: 0 0 6px #34d399; }
+    50%       { box-shadow: 0 0 16px #10b981, 0 0 28px #10b981; }
+  }
+  @keyframes estop-pulse {
+    0%, 100% { box-shadow: 0 0 8px #ef4444; }
+    50%       { box-shadow: 0 0 24px #ef4444, 0 0 40px #dc2626; }
+  }
+
+  .drive-btn-lift {
+    margin-left: auto;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fff;
+    background: #dc2626;
+    border-radius: 0.35rem;
+    border: none;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .drive-btn-lift:hover { background: #ef4444; }
+
+  /* D-pad: 3-column CSS grid */
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 64px);
+    grid-template-rows: repeat(2, 64px);
+    gap: 8px;
+    user-select: none;
+    touch-action: none;
+  }
+  .dpad-empty { /* placeholder for empty grid cells */ }
+
+  .dpad-btn {
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    border-radius: 12px;
+    border: 2px solid #475569;
+    background: #1e293b;
+    color: #e2e8f0;
+    cursor: pointer;
+    transition: all 0.1s;
+    touch-action: none;
+    box-shadow: 0 2px 8px -2px rgb(0 0 0 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.06);
+  }
+  .dpad-btn:hover:not(:disabled) {
+    background: #263548;
+    border-color: #64748b;
+    color: #fff;
+    box-shadow: 0 0 16px -4px rgb(148 163 184 / 0.3), 0 2px 8px -2px rgb(0 0 0 / 0.5);
+    transform: translateY(-1px);
+  }
+  .dpad-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+  .dpad-btn-active {
+    background: #1d3a6e !important;
+    border-color: #60a5fa !important;
+    color: #93c5fd !important;
+    box-shadow: 0 0 12px #3b82f6, inset 0 1px 0 rgb(255 255 255 / 0.1) !important;
+    transform: scale(0.94) !important;
+  }
+
+  /* E-STOP button */
+  .drive-estop {
+    width: 100%;
+    height: 48px;
+    padding: 0 1.25rem;
+    font-size: 0.85rem;
+    font-weight: 900;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #fff;
+    border-radius: 12px;
+    border: 2px solid rgb(239 68 68 / 0.7);
+    background: linear-gradient(135deg, #7f1d1d, #dc2626);
+    cursor: pointer;
+    transition: all 0.15s;
+    box-shadow: 0 0 20px -4px rgb(220 38 38 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.1);
+  }
+  .drive-estop:hover:not(:disabled) {
+    background: linear-gradient(135deg, #991b1b, #ef4444);
+    box-shadow: 0 0 32px -2px rgb(239 68 68 / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.12);
+    transform: translateY(-1px);
+  }
+  .drive-estop-active {
+    animation: estop-btn-pulse 0.6s ease-in-out infinite !important;
+  }
+  @keyframes estop-btn-pulse {
+    0%, 100% { box-shadow: 0 0 18px -4px rgb(239 68 68 / 0.5); }
+    50%       { box-shadow: 0 0 40px -2px rgb(239 68 68 / 0.95), 0 0 60px -8px rgb(220 38 38 / 0.6); }
+  }
+  .drive-estop:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; transform: none; }
+
+  .drive-hint {
+    font-size: 0.58rem;
+    color: #334155;
+    letter-spacing: 0.05em;
+    text-align: center;
+  }
+}
+
+/* ── Rover Control Panel (wrapper + mode toggle) ───────────────────────────── */
+@layer components {
+  .rover-control-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1.1rem;
+    border-radius: 16px;
+    border: 1px solid #1e293b;
+    background: linear-gradient(160deg, #070d1a, #0d1829);
+    backdrop-filter: blur(16px);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.05),
+      0 8px 32px -8px rgb(0 0 0 / 0.7),
+      0 0 0 1px rgb(255 255 255 / 0.02);
+  }  /* ── Rover Mode Toggle button (ONLINE / REMOTE) ── */
+  .rover-mode-btn {
+    width: 100%;
+    height: 52px;
+    border-radius: 14px;
+    border: 2px solid #475569;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 1rem;
+  }
+  .rover-mode-remote {
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    border-color: #475569;
+    color: #94a3b8;
+  }
+  .rover-mode-remote:hover {
+    border-color: #64748b;
+    color: #cbd5e1;
+    background: linear-gradient(135deg, #263548, #1e293b);
+  }
+  .rover-mode-online {
+    background: linear-gradient(135deg, #14532d, #052e16);
+    border-color: #22c55e;
+    color: #4ade80;
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+    animation: rover-mode-online-pulse 2s ease-in-out infinite;
+  }
+  .rover-mode-online:hover {
+    box-shadow: 0 0 32px rgba(34, 197, 94, 0.5);
+    background: linear-gradient(135deg, #166534, #14532d);
+  }
+  @keyframes rover-mode-online-pulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(34, 197, 94, 0.3); }
+    50%       { box-shadow: 0 0 36px rgba(34, 197, 94, 0.6), 0 0 60px rgba(34, 197, 94, 0.2); }
+  }
+
+
+  /* ── Mode toggle: pill buttons ── */
+  .mode-toggle-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 999px;
+    padding: 4px;
+    gap: 2px;
+  }
+  /* Hide the old switch/thumb — we use pill-tab buttons instead */
+  .mode-switch { display: none; }
+  .mode-tab-label {
+    flex: 1;
+    padding: 0.4rem 1.1rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    text-align: center;
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  .mode-tab-active {
+    background: #3b82f6;
+    color: #fff;
+    box-shadow: 0 0 12px -2px rgb(59 130 246 / 0.7);
+  }
+  .mode-tab-dim {
+    color: #475569;
+    background: transparent;
+  }
+  .mode-tab-dim:hover { color: #94a3b8; }
+
+  /* Mode indicator strip */
+  .mode-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.3rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transition: background 0.3s, border-color 0.3s;
+  }
+  .mode-indicator-drive {
+    background: rgb(59 130 246 / 0.1);
+    border: 1px solid rgb(59 130 246 / 0.3);
+    color: #60a5fa;
+  }
+  .mode-indicator-arm {
+    background: rgb(139 92 246 / 0.1);
+    border: 1px solid rgb(167 139 250 / 0.3);
+    color: #a78bfa;
+  }
+  .mode-indicator-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mode-indicator-drive .mode-indicator-dot {
+    background: #3b82f6;
+    box-shadow: 0 0 6px #3b82f6;
+    animation: drive-indicator-pulse 1.2s ease-in-out infinite;
+  }
+  .mode-indicator-arm .mode-indicator-dot {
+    background: #a78bfa;
+    box-shadow: 0 0 6px #a78bfa;
+    animation: arm-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes drive-indicator-pulse {
+    0%, 100% { box-shadow: 0 0 4px #3b82f6; }
+    50%       { box-shadow: 0 0 14px #3b82f6; }
+  }
+  @keyframes arm-pulse {
+    0%, 100% { box-shadow: 0 0 4px #a78bfa; }
+    50%       { box-shadow: 0 0 14px #a78bfa; }
+  }
+  .mode-indicator-text { letter-spacing: 0.12em; }
+
+  /* Speed slider */
+  .speed-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.7rem;
+    border-radius: 10px;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+  }
+  .speed-label {
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #475569;
+    white-space: nowrap;
+    min-width: 5rem;
+  }
+  .speed-slider {
+    flex: 1;
+    height: 4px;
+    appearance: none;
+    -webkit-appearance: none;
+    background: linear-gradient(90deg, #1d4ed8, #3b82f6);
+    border-radius: 999px;
+    cursor: pointer;
+    outline: none;
+  }
+  .speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #60a5fa;
+    box-shadow: 0 0 10px rgb(96 165 250 / 0.7);
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    transition: box-shadow 0.15s;
+  }
+  .speed-slider::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 16px rgb(96 165 250 / 0.9);
+  }
+  .speed-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #60a5fa;
+    box-shadow: 0 0 10px rgb(96 165 250 / 0.7);
+    cursor: pointer;
+    border: 2px solid #0f172a;
+  }
+  /* Arm speed slider variant (purple) */
+  .speed-slider-arm {
+    background: linear-gradient(90deg, #6d28d9, #8b5cf6);
+  }
+  .speed-slider-arm::-webkit-slider-thumb {
+    background: #a78bfa;
+    box-shadow: 0 0 10px rgb(167 139 250 / 0.7);
+  }
+  .speed-slider-arm::-moz-range-thumb {
+    background: #a78bfa;
+    box-shadow: 0 0 10px rgb(167 139 250 / 0.7);
+  }
+  .speed-value {
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #60a5fa;
+    min-width: 2.8rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .speed-value-arm { color: #a78bfa; }
+}
+
+/* ── Arm Control ────────────────────────────────────────────────────────────── */
+@layer components {
+  .arm-control {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid #334155;
+    background: linear-gradient(160deg, #0f172a, #1e293b);
+    backdrop-filter: blur(14px);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.05),
+      0 8px 32px -8px rgb(0 0 0 / 0.7);
+  }
+
+  /* Status bar */
+  .arm-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid #1e293b;
+  }
+  .arm-status-text {
+    flex: 1;
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  .arm-active-badge {
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.12rem 0.5rem;
+    border-radius: 0.3rem;
+  }
+
+  /* Joint grid */
+  .arm-grid { display: flex; flex-direction: column; gap: 0.35rem; }
+  .arm-row  { display: flex; align-items: center; gap: 0.5rem; }
+
+  /* Joint label — base color set by modifier */
+  .arm-joint-label {
+    font-size: 0.58rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    min-width: 4.5rem;
+    flex-shrink: 0;
+  }
+  /* Color-coded joint labels per spec */
+  .arm-label-blue   { color: #3b82f6; }   /* Base */
+  .arm-label-green  { color: #10b981; }   /* Shoulder */
+  .arm-label-purple { color: #8b5cf6; }   /* Wrist */
+  .arm-label-orange { color: #f59e0b; }   /* Jaw */
+  .arm-label-yellow { color: #ef4444; }   /* Claw */
+  .arm-label-cyan   { color: #06b6d4; }   /* 360° */
+
+  /* Badge color variants */
+  .arm-color-blue   { background: rgb(59 130 246 / 0.2);  color: #93c5fd; }
+  .arm-color-green  { background: rgb(16 185 129 / 0.2);  color: #6ee7b7; }
+  .arm-color-purple { background: rgb(139 92 246 / 0.2);  color: #c4b5fd; }
+  .arm-color-orange { background: rgb(245 158 11 / 0.2);  color: #fcd34d; }
+  .arm-color-yellow { background: rgb(239 68 68 / 0.2);   color: #fca5a5; }
+  .arm-color-cyan   { background: rgb(6 182 212 / 0.2);   color: #67e8f9; }
+
+  .arm-btn-pair { display: flex; gap: 0.3rem; flex: 1; }
+
+  /* Base arm button */
+  .arm-btn {
+    flex: 1;
+    padding: 0.4rem 0.35rem;
+    font-size: 0.63rem;
+    font-weight: 700;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: #1e293b;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.1s;
+    touch-action: none;
+    user-select: none;
+    text-align: center;
+    white-space: nowrap;
+    box-shadow: 0 1px 4px -1px rgb(0 0 0 / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+  .arm-btn:hover:not(:disabled) {
+    background: #263548;
+    color: #e2e8f0;
+    border-color: #475569;
+    transform: translateY(-1px);
+  }
+  .arm-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+  /* Per-color hover glow */
+  .arm-btn-blue:hover:not(:disabled)   { box-shadow: 0 0 10px -3px rgb(59 130 246 / 0.45); border-color: rgb(59 130 246 / 0.4); }
+  .arm-btn-green:hover:not(:disabled)  { box-shadow: 0 0 10px -3px rgb(16 185 129 / 0.45); border-color: rgb(16 185 129 / 0.4); }
+  .arm-btn-purple:hover:not(:disabled) { box-shadow: 0 0 10px -3px rgb(139 92 246 / 0.45); border-color: rgb(139 92 246 / 0.4); }
+  .arm-btn-orange:hover:not(:disabled) { box-shadow: 0 0 10px -3px rgb(245 158 11 / 0.45); border-color: rgb(245 158 11 / 0.4); }
+  .arm-btn-yellow:hover:not(:disabled) { box-shadow: 0 0 10px -3px rgb(239 68 68 / 0.45);  border-color: rgb(239 68 68 / 0.4); }
+  .arm-btn-cyan:hover:not(:disabled)   { box-shadow: 0 0 10px -3px rgb(6 182 212 / 0.45);  border-color: rgb(6 182 212 / 0.4); }
+
+  /* Active (held) states per color */
+  .arm-btn-active { transform: scale(0.94) !important; }
+  .arm-btn-active-blue {
+    background: rgb(59 130 246 / 0.15) !important;
+    border-color: #3b82f6 !important;
+    color: #93c5fd !important;
+    box-shadow: 0 0 14px -3px rgb(59 130 246 / 0.6) !important;
+  }
+  .arm-btn-active-green {
+    background: rgb(16 185 129 / 0.15) !important;
+    border-color: #10b981 !important;
+    color: #6ee7b7 !important;
+    box-shadow: 0 0 14px -3px rgb(16 185 129 / 0.6) !important;
+  }
+  .arm-btn-active-purple {
+    background: rgb(139 92 246 / 0.15) !important;
+    border-color: #8b5cf6 !important;
+    color: #c4b5fd !important;
+    box-shadow: 0 0 14px -3px rgb(139 92 246 / 0.6) !important;
+  }
+  .arm-btn-active-orange {
+    background: rgb(245 158 11 / 0.15) !important;
+    border-color: #f59e0b !important;
+    color: #fcd34d !important;
+    box-shadow: 0 0 14px -3px rgb(245 158 11 / 0.6) !important;
+  }
+  .arm-btn-active-yellow {
+    background: rgb(239 68 68 / 0.15) !important;
+    border-color: #ef4444 !important;
+    color: #fca5a5 !important;
+    box-shadow: 0 0 14px -3px rgb(239 68 68 / 0.6) !important;
+  }
+  .arm-btn-active-cyan {
+    background: rgb(6 182 212 / 0.15) !important;
+    border-color: #06b6d4 !important;
+    color: #67e8f9 !important;
+    box-shadow: 0 0 14px -3px rgb(6 182 212 / 0.6) !important;
+  }
+
+  /* Reset All button — red, full width */
+  .arm-reset-btn {
+    width: 100%;
+    padding: 0.55rem 1.25rem;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #fff;
+    border-radius: 10px;
+    border: 2px solid rgb(220 38 38 / 0.6);
+    background: linear-gradient(135deg, #7f1d1d, #dc2626);
+    cursor: pointer;
+    transition: all 0.15s;
+    box-shadow: 0 0 18px -4px rgb(220 38 38 / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.1);
+    margin-top: 0.2rem;
+  }
+  .arm-reset-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #991b1b, #ef4444);
+    box-shadow: 0 0 28px -3px rgb(239 68 68 / 0.65), inset 0 1px 0 rgb(255 255 255 / 0.12);
+    transform: translateY(-1px);
+  }
+  .arm-reset-btn:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; }
+}
+
+/* ── Detection List (below camera, not overlapping) ─────────────────────────── */
+@layer components {
+  .detection-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .detection-list-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.4rem;
+    background: rgb(15 23 42 / 0.5);
+    border: 1px solid rgb(255 255 255 / 0.05);
+  }
+  .detection-dot {
+    flex-shrink: 0;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+  }
+  .detection-class {
+    flex: 1;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #e2e8f0;
+    text-transform: capitalize;
+  }
+  .detection-conf {
+    font-size: 0.7rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+}
