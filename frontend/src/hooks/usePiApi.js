@@ -32,7 +32,7 @@ import { PI_BASE_URL, PI_WS_URL, PI_WS_RECONNECT_MS } from '../config/constants'
 import { normalizePiSensors, normalizePiDetections, normalizePiStatus } from '../lib/normalize';
 
 // ── Guard: host configuration ─────────────────────────────────────────────────
-const _piHostConfigured = Boolean(import.meta.env.VITE_PI_HOST || 'basketball-dom-acer-shop.trycloudflare.com');
+const _piHostConfigured = Boolean(import.meta.env.VITE_PI_HOST || 'tomato-davis-consultancy-concrete.trycloudflare.com');
 
 // ── Singleton shared state ────────────────────────────────────────────────────
 // Multiple hook instances share one copy of the latest data.
