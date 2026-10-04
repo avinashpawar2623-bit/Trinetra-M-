@@ -9,14 +9,18 @@
  * Set VITE_PI_HOST in frontend/.env to the Pi's IP or Tailscale hostname.
  * Example: VITE_PI_HOST=100.64.0.5  or  VITE_PI_HOST=my-pi.local
  */
-const _piHost = import.meta.env.VITE_PI_HOST || '100.110.150.72';
-const _piPort = import.meta.env.VITE_PI_PORT || '8000';
+const _piHost = import.meta.env.VITE_PI_HOST || 'basketball-dom-acer-shop.trycloudflare.com';
+const _piPort = import.meta.env.VITE_PI_PORT || '';
+// When a port is provided (LAN / Tailscale) use http/ws; without port use https/wss (Cloudflare tunnel).
+const _portSuffix = _piPort ? `:${_piPort}` : '';
+const _httpScheme = _piPort ? 'http' : 'https';
+const _wsScheme   = _piPort ? 'ws'   : 'wss';
 /** Base HTTP URL for the Pi FastAPI (GET /sensors, POST /control, etc.). */
-export const PI_BASE_URL = `http://${_piHost}:${_piPort}`;
+export const PI_BASE_URL = `${_httpScheme}://${_piHost}${_portSuffix}`;
 /** WebSocket URL for real-time push (/ws sends data every 500 ms). */
-export const PI_WS_URL = `ws://${_piHost}:${_piPort}/ws`;
+export const PI_WS_URL = `${_wsScheme}://${_piHost}${_portSuffix}/ws`;
 /** MJPEG stream URL — used directly as <img src={...} />. */
-export const PI_STREAM_URL = `http://${_piHost}:${_piPort}/stream`;
+export const PI_STREAM_URL = `${_httpScheme}://${_piHost}${_portSuffix}/stream`;
 /** ms between WebSocket reconnect attempts after a disconnect. */
 export const PI_WS_RECONNECT_MS = 5_000;
 
