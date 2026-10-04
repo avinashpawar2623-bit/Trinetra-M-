@@ -9,7 +9,7 @@
  * Set VITE_PI_HOST in frontend/.env to the Pi's IP or Tailscale hostname.
  * Example: VITE_PI_HOST=100.64.0.5  or  VITE_PI_HOST=my-pi.local
  */
-const _piHost = import.meta.env.VITE_PI_HOST || '100.64.12.34';
+const _piHost = import.meta.env.VITE_PI_HOST || '100.110.150.72';
 const _piPort = import.meta.env.VITE_PI_PORT || '8000';
 /** Base HTTP URL for the Pi FastAPI (GET /sensors, POST /control, etc.). */
 export const PI_BASE_URL = `http://${_piHost}:${_piPort}`;
