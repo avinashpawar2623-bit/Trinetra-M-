@@ -9,7 +9,7 @@
  * Set VITE_PI_HOST in frontend/.env to the Pi's IP or Tailscale hostname.
  * Example: VITE_PI_HOST=100.64.0.5  or  VITE_PI_HOST=my-pi.local
  */
-const _piHost = import.meta.env.VITE_PI_HOST || 'tomato-davis-consultancy-concrete.trycloudflare.com';
+const _piHost = import.meta.env.VITE_PI_HOST || 'vsit.tail13799b.ts.net';
 const _piPort = import.meta.env.VITE_PI_PORT || '';
 // When a port is provided (LAN / Tailscale) use http/ws; without port use https/wss (Cloudflare tunnel).
 const _portSuffix = _piPort ? `:${_piPort}` : '';
