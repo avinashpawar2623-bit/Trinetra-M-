@@ -10,7 +10,7 @@ service cloud.firestore {
       allow create: if request.auth != null
         && request.resource.data.keys().hasOnly(
              ['type', 'label', 'confidence', 'message', 'timestamp', 'clientTs', 'source', 'createdBy'])
-        && request.resource.data.type in ['gas', 'flame', 'detection']
+        && request.resource.data.type in ['gas', 'flame', 'detection', 'pump']
         && request.resource.data.label is string
         && request.resource.data.label.size() <= 64
         && request.resource.data.message is string

@@ -13,3 +13,4 @@ __pycache__/
 venv/
 *.pt
 serviceAccount*.json
+trinetra-m-firebase-adminsdk-*.json

@@ -10,7 +10,7 @@ import LoginPage from './LoginPage';
  * data is mounted before authentication.
  */
 export default function AuthGate({ children }) {
-  const { user, loading } = useAuth();
+  const { user, role, loading, sessionError } = useAuth();
 
   if (firebaseConfigError) {
     return (
@@ -24,5 +24,5 @@ export default function AuthGate({ children }) {
 
   if (loading) return <LoadingState label="Checking session…" fullScreen />;
   if (!user) return <LoginPage />;
-  return children(user);
+  return children({ user, role, sessionError });
 }

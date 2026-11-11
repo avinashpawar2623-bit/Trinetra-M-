@@ -3,37 +3,37 @@
  * All thresholds, timeouts, and tunables live here so behavior can be
  * adjusted without hunting through components.
  */
+import { buildPiConfig, normalizeBaseUrl, resolveApiUrl } from '../lib/apiConfig';
+
+export { resolveApiUrl };
+
+const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || '');
+export const API_BASE_URL = API_BASE;
+export const API_HEALTH_URL = resolveApiUrl('api/health', API_BASE);
 
 // ---- Raspberry Pi FastAPI backend -----------------------------------------
 /**
  * Set VITE_PI_HOST in frontend/.env to the Pi's IP or Tailscale hostname.
  * Example: VITE_PI_HOST=100.64.0.5  or  VITE_PI_HOST=my-pi.local
  */
-const _piHost = import.meta.env.VITE_PI_HOST || 'vsit.tail13799b.ts.net';
-const _piPort = import.meta.env.VITE_PI_PORT || '';
-// When a port is provided (LAN / Tailscale) use http/ws; without port use https/wss (Cloudflare tunnel).
-const _portSuffix = _piPort ? `:${_piPort}` : '';
-const _httpScheme = _piPort ? 'http' : 'https';
-const _wsScheme   = _piPort ? 'ws'   : 'wss';
+const piConfig = buildPiConfig({
+  host: import.meta.env.VITE_PI_HOST,
+  port: import.meta.env.VITE_PI_PORT,
+});
 /** Base HTTP URL for the Pi FastAPI (GET /sensors, POST /control, etc.). */
-export const PI_BASE_URL = `${_httpScheme}://${_piHost}${_portSuffix}`;
+export const PI_BASE_URL = piConfig.baseUrl;
 /** WebSocket URL for real-time push (/ws sends data every 500 ms). */
-export const PI_WS_URL = `${_wsScheme}://${_piHost}${_portSuffix}/ws`;
+export const PI_WS_URL = piConfig.wsUrl;
 /** MJPEG stream URL — used directly as <img src={...} />. */
-export const PI_STREAM_URL = `${_httpScheme}://${_piHost}${_portSuffix}/stream`;
+export const PI_STREAM_URL = piConfig.streamUrl;
 /**
  * Initial WebSocket reconnect delay (ms). Doubles on each failure:
- *   attempt 0 → 1 s, 1 → 2 s, 2 → 4 s, 3 → 8 s, 4+ → 10 s (capped).
+ *   attempt 0 → 500 ms, 1 → 1 s, 2 → 2 s, … capped at PI_WS_MAX_RECONNECT_MS.
+ * Override with VITE_WS_RECONNECT_MS in .env.
  */
-export const PI_WS_RECONNECT_MS = 1_000;
-/** Hard ceiling for exponential backoff (ms). */
-export const PI_WS_MAX_RECONNECT_MS = 10_000;
-/**
- * Mark sensor data as stale after this many ms with no WebSocket message.
- * Replaces polling /api/health (which does not exist on Vercel).
- * Must be > the Pi's push interval (500 ms) with generous headroom.
- */
-export const PI_WS_STALE_MS = 6_000;
+export const PI_WS_RECONNECT_MS = Number(import.meta.env.VITE_WS_RECONNECT_MS || 500);
+/** Hard ceiling for exponential backoff. Override with VITE_WS_MAX_RECONNECT_MS. */
+export const PI_WS_MAX_RECONNECT_MS = Number(import.meta.env.VITE_WS_MAX_RECONNECT_MS || 30_000);
 
 // ---- RTDB paths -----------------------------------------------------------
 export const RTDB_PATHS = {
@@ -93,7 +93,7 @@ export const BATTERY_THRESHOLDS = {
 /** '4/3' (ESP32-CAM default VGA) or '16/9'. */
 export const CAMERA_ASPECT_RATIO = '4/3';
 /** Backend proxy endpoint for the MJPEG stream. */
-export const CAMERA_PROXY_PATH = '/api/camera/stream';
+export const CAMERA_PROXY_PATH = resolveApiUrl('api/camera/stream', API_BASE_URL);
 /**
  * Force using the backend proxy even if RTDB/env supply a direct URL.
  * Useful when the dashboard is served over HTTPS (mixed-content) or

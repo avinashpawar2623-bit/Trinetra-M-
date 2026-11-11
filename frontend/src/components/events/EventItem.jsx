@@ -4,6 +4,7 @@ const TYPE_STYLES = {
   gas: { icon: '💨', ring: 'border-amber-500/40 bg-amber-500/10', title: 'Gas' },
   flame: { icon: '🔥', ring: 'border-red-500/40 bg-red-500/10', title: 'Flame' },
   detection: { icon: '👁️', ring: 'border-sky-500/40 bg-sky-500/10', title: 'Detection' },
+  pump: { icon: '💧', ring: 'border-cyan-500/40 bg-cyan-500/10', title: 'Pump' },
   unknown: { icon: '•', ring: 'border-slate-600 bg-slate-800/60', title: 'Event' },
 };
 

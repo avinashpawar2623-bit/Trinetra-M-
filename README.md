@@ -230,3 +230,27 @@ All thresholds and timeouts live in [`frontend/src/config/constants.js`](fronten
 **"Missing Firebase config" screen.** `frontend/.env` is missing or incomplete. Restart `npm run dev` after editing it.
 
 **`permission-denied` errors.** You aren't signed in, or the rules haven't been deployed. For RTDB writes, the payload is also checked against the validation rules: for example, `distanceFront` must be a number or `"no echo"`, and unknown fields are rejected.
+
+---
+
+## 10. Command gateway, roles, and rollback
+
+Live sensors and detections arrive on one shared WebSocket to the Pi (`/ws`). The browser does not post motor commands to the Pi. Drive, arm, and mode commands go to this backend, which checks a Firebase ID token and forwards only `{speed, steer, estop}` or the existing arm and mode bodies.
+
+Roles are Firebase custom claims. A missing claim is treated as `viewer`. Create accounts in the Firebase console, then set the claim from a trusted machine:
+
+```bash
+cd backend
+GOOGLE_APPLICATION_CREDENTIALS=/secure/serviceAccount.json \
+  node scripts/set-role.mjs operator@example.com admin
+GOOGLE_APPLICATION_CREDENTIALS=/secure/serviceAccount.json \
+  node scripts/set-role.mjs viewer@example.com viewer
+```
+
+The user must sign in again. There is no public registration page. Logout revokes refresh tokens when Admin credentials are configured.
+
+`PI_BASE_URL` must be reachable from the backend. The Pi's `/control`, `/arm_control`, and `/setmode` ports should not stay exposed on a public tunnel; the dashboard gateway is the authorization boundary. Pump activation remains the rover's existing automatic logic. The dashboard only displays pump fields when telemetry includes them.
+
+Deploy the updated rules with `firebase deploy --only database,firestore:rules`. Accounts that already write telemetry and have no `role` claim can still write sensor paths. Accounts with `role: viewer` cannot. `rover/commands` accepts writes only from `role: admin`. The running dashboard does not use that path for motion.
+
+Rollback: check out the previous commit and redeploy the previous `database.rules.json` and `firestore.rules`. The Pi API contract is unchanged. No firmware change is required for the existing drive, arm, sensor, or camera behavior. Pump telemetry fields are optional.

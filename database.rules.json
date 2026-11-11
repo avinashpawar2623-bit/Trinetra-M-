@@ -3,28 +3,38 @@
     ".read": false,
     ".write": false,
     "rover": {
-      ".read": "auth != null",
-      ".write": "auth != null",
+      ".read": false,
+      ".write": false,
 
       "sensors": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role != 'viewer'",
         "mq2": { ".validate": "newData.isBoolean()" },
         "mq6": { ".validate": "newData.isBoolean()" },
         "flame": { ".validate": "newData.isBoolean()" },
+        "pump": { ".validate": "newData.isBoolean()" },
+        "pumpFault": { ".validate": "newData.isBoolean()" },
+        "pumpRuntimeS": { ".validate": "newData.isNumber() && newData.val() >= 0" },
         "distanceFront": { ".validate": "newData.isNumber() || newData.val() === 'no echo'" },
         "distanceRear": { ".validate": "newData.isNumber() || newData.val() === 'no echo'" },
         "temperature": { ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 125" },
         "humidity": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
         "battery": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "updatedAt": { ".validate": "newData.isNumber()" },
         "$other": { ".validate": false }
       },
 
       "status": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role != 'viewer'",
         "connected": { ".validate": "newData.isBoolean()" },
         "lastSeen": { ".validate": "newData.isNumber()" },
         "$other": { ".validate": false }
       },
 
       "detections": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role != 'viewer'",
         ".validate": "newData.hasChildren(['timestamp', 'frameWidth', 'frameHeight'])",
         "timestamp": { ".validate": "newData.isNumber()" },
         "frameWidth": { ".validate": "newData.isNumber() && newData.val() > 0" },
@@ -44,12 +54,31 @@
       },
 
       "camera": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role != 'viewer'",
         "streamUrl": { ".validate": "newData.isString() && newData.val().length <= 512" },
         "$other": { ".validate": false }
       },
 
       "history": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role != 'viewer'",
         ".indexOn": ["timestamp"]
+      },
+
+      "$other": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role != 'viewer'"
+      },
+
+      "commands": {
+        ".read": "auth != null && auth.token.role == 'admin'",
+        ".write": "auth != null && auth.token.role == 'admin'",
+        "speed": { ".validate": "newData.isNumber() && newData.val() >= -100 && newData.val() <= 100" },
+        "steer": { ".validate": "newData.isNumber() && newData.val() >= -100 && newData.val() <= 100" },
+        "estop": { ".validate": "newData.isBoolean()" },
+        "updatedAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
       }
     }
   }

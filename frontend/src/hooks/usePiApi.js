@@ -1,336 +1,227 @@
 /**
- * usePiApi — Single source of truth for the Raspberry Pi FastAPI backend.
+ * One Pi WebSocket for the whole dashboard.
  *
- * WebSocket /ws pushes { mq2, mq6, flame, dist1_cm, dist2_cm, temp_c,
- * humidity, esp_connected, fps, detections? } every 500 ms.
+ * Several components call this hook. The socket itself is ref-counted so
+ * those callers share a single connection. A short teardown delay absorbs
+ * React StrictMode's mount/unmount/remount cycle.
  *
- * The hook exposes:
- *   • sensors     { data, loading, error }
- *   • status      { data, loading, error }
- *   • detections  { data, loading, error }
- *   • wsStatus    'connecting' | 'connected' | 'disconnected'
- *   • sendDriveCommand(speed, steer, estop)  → POST /control (fire-and-forget)
+ * A dropped socket keeps the last good sample and marks the link disconnected.
+ * It does not delete the last reading.
  *
- * BUG FIXES applied in this version:
+ * link values: 'connecting' | 'live' | 'stale' | 'invalid' | 'disconnected'
+ *   • 'live'         — message received within SENSOR_LIVE_MS (2 s)
+ *   • 'stale'        — connected but no fresh message for up to SENSOR_STALE_MS (10 s)
+ *   • 'disconnected' — socket closed or no message for > SENSOR_STALE_MS
  *
- * 1. EXPONENTIAL BACKOFF — reconnect delay starts at PI_WS_RECONNECT_MS (1 s)
- *    and doubles each attempt up to PI_WS_MAX_RECONNECT_MS (10 s).  The old
- *    code always waited a fixed 5 s but a fast TCP-refuse (Tailscale tunnel not
- *    up yet) made the loop appear as a "storm" of connection attempts.
+ * This replaces all HTTP /api/health polling — staleness is detected purely
+ * from WebSocket message timing via classifyLink() + the 1 s clockTimer.
  *
- * 2. STALENESS DETECTION — sensor data is marked stale/lost if no WS message
- *    has been received for PI_WS_STALE_MS (6 s). This replaces any polling of
- *    /api/health (which does not exist on Vercel and caused 404 floods).
- *    The stale timer is reset on every incoming message and cleared on unmount.
- *
- * 3. ONE SOCKET AT A TIME — the cleanup function nulls all WS handlers before
- *    calling ws.close(), so a racing onclose cannot schedule a second reconnect.
- *    The initial 300 ms delay is short enough that StrictMode's fake-unmount
- *    cancels it before it fires, giving the real mount a clean slate.
- *
- * 4. WS STATUS LABEL — exposes 'connecting' | 'connected' | 'disconnected' so
- *    the UI can show a meaningful indicator without polling any HTTP endpoint.
- *
- * Shared state (sensors/status/detections/wsStatus) is still a module-level
- * singleton so all consumers in the same React tree read the same values.
+ * Reconnect uses exponential backoff capped at PI_WS_MAX_RECONNECT_MS so a
+ * fast TCP-refuse (Pi offline / Tailscale tunnel down) cannot produce a storm.
  */
-import { useEffect, useRef, useState } from 'react';
-import {
-  PI_BASE_URL,
-  PI_WS_URL,
-  PI_WS_RECONNECT_MS,
-  PI_WS_MAX_RECONNECT_MS,
-  PI_WS_STALE_MS,
-} from '../config/constants';
-import { normalizePiSensors, normalizePiDetections, normalizePiStatus } from '../lib/normalize';
+import { useEffect, useState } from 'react';
+import { PI_WS_MAX_RECONNECT_MS, PI_WS_RECONNECT_MS, PI_WS_URL } from '../config/constants';
+import { normalizePiDetections, normalizePiSensors, normalizePiStatus } from '../lib/normalize';
+import { classifyLink } from '../lib/telemetry';
 
-// ── Guard: host configuration ─────────────────────────────────────────────────
-const _piHostConfigured = Boolean(import.meta.env.VITE_PI_HOST || 'vsit.tail13799b.ts.net');
+export { sendArmCommand, sendDriveCommand, sendModeCommand } from '../lib/controlClient';
 
-// ── Singleton shared state ────────────────────────────────────────────────────
-// Multiple hook instances share one copy of the latest data.
-// Only the connection itself lives inside useEffect.
+const configured = Boolean(PI_WS_URL);
 
-/**
- * WebSocket lifecycle status — 'connecting' | 'connected' | 'disconnected'.
- * Exposed via the hook so components can render a meaningful indicator without
- * polling any HTTP endpoint.
- */
-const WS_CONNECTING   = 'connecting';
-const WS_CONNECTED    = 'connected';
-const WS_DISCONNECTED = 'disconnected';
-
-function getInitialState() {
-  if (!_piHostConfigured) {
-    return {
-      sensors:    { data: null, loading: false, error: 'VITE_PI_HOST not set in .env' },
-      status:     { data: null, loading: false, error: 'VITE_PI_HOST not set in .env' },
-      detections: { data: null, loading: false, error: 'VITE_PI_HOST not set in .env' },
-      wsStatus:   WS_DISCONNECTED,
-    };
-  }
+function blankState() {
+  const error = configured ? null : 'Pi host is not configured';
   return {
-    sensors:    { data: null, loading: true, error: null },
-    status:     { data: null, loading: true, error: null },
-    detections: { data: null, loading: true, error: null },
-    wsStatus:   WS_CONNECTING,
+    sensors: { data: null, loading: configured, error },
+    status: { data: null, loading: configured, error },
+    detections: { data: null, loading: configured, error },
+    link: configured ? 'connecting' : 'disconnected',
+    diagnostics: {
+      lastMessageAt: null,
+      intervalMs: null,
+      reconnects: 0,
+      invalidCount: 0,
+      wsOpen: false,
+    },
   };
 }
 
-let _sharedState = getInitialState();
-const _stateListeners = new Set();
+let shared = blankState();
+const listeners = new Set();
+let subscribers = 0;
+let ws = null;
+let reconnectTimer = null;
+let teardownTimer = null;
+let clockTimer = null;
+let attempt = 0;
+let lastGoodAt = null;
+let wsOpen = false;
+let lastInvalid = false;
 
-function notifyState() {
-  _stateListeners.forEach((fn) => fn(_sharedState));
+function currentLink(now = Date.now()) {
+  return classifyLink({ wsOpen, lastGoodAt, now, lastMessageInvalid: lastInvalid });
 }
 
-function patchState(patch) {
-  _sharedState = { ..._sharedState, ...patch };
-  notifyState();
+function publish(force) {
+  const link = currentLink();
+  if (!force && link === shared.link) return;
+  shared = { ...shared, link };
+  listeners.forEach((fn) => fn(shared));
 }
 
-// ── Drive command ─────────────────────────────────────────────────────────────
+function failClosed(message) {
+  wsOpen = false;
+  shared = {
+    ...shared,
+    sensors: { ...shared.sensors, loading: false, error: shared.sensors.data ? null : message },
+    status: {
+      data: shared.status.data ? { ...shared.status.data, connected: false } : null,
+      loading: false,
+      error: shared.status.data ? null : message,
+    },
+    detections: { ...shared.detections, loading: false, error: shared.detections.data ? null : message },
+    diagnostics: { ...shared.diagnostics, wsOpen: false },
+  };
+  publish(true);
+}
 
-/**
- * POST /control with { speed, steer, estop }.
- * Fire-and-forget — errors are suppressed (non-blocking, not critical).
- * The ESP32 has a 600 ms watchdog; callers must send every ~80–100 ms while held.
- */
-export async function sendDriveCommand({ speed = 0, steer = 0, estop = false } = {}) {
-  if (!_piHostConfigured) return;
-  try {
-    await fetch(`${PI_BASE_URL}/control`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ speed, steer, estop }),
-    });
-  } catch {
-    // Silently ignore — DriveControl's disabled state should prevent most failures.
+function connect() {
+  if (subscribers <= 0 || ws) return;
+  if (!PI_WS_URL) {
+    wsOpen = false;
+    shared = { ...shared, diagnostics: { ...shared.diagnostics, wsOpen: false } };
+    publish(true);
+    return;
   }
-}
-
-// ── Arm command ──────────────────────────────────────────────────────────────
-
-/**
- * POST /arm_control with { base, arm, wrist, clawJ, claw, rot, speed, reset }.
- * Fire-and-forget — same pattern as sendDriveCommand.
- * The caller must send every ~80 ms while a button is held.
- */
-export async function sendArmCommand({
-  base = 0, arm = 0, wrist = 0, clawJ = 0,
-  claw = 0, rot = 0, speed = 5, reset = false,
-} = {}) {
-  if (!_piHostConfigured) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
   try {
-    await fetch(`${PI_BASE_URL}/arm_control`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base, arm, wrist, clawJ, claw, rot, speed, reset }),
-    });
+    ws = new WebSocket(PI_WS_URL);
   } catch {
-    // Silently ignore.
+    scheduleReconnect();
+    return;
   }
-}
 
-// ── Mode command ──────────────────────────────────────────────────────────────
+  ws.onopen = () => {
+    wsOpen = true;
+    attempt = 0;
+    shared = { ...shared, diagnostics: { ...shared.diagnostics, wsOpen: true } };
+    publish(true);
+  };
 
-/**
- * POST /setmode with { mode: "ONLINE" | "REMOTE" }.
- * Tells the rover to switch operating mode via UART.
- * Fire-and-forget — errors suppressed.
- */
-export async function sendModeCommand(mode) {
-  if (!_piHostConfigured) return;
-  try {
-    await fetch(`${PI_BASE_URL}/setmode`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
-    });
-  } catch {
-    // Silently ignore.
-  }
-}
-
-// ── React hook ────────────────────────────────────────────────────────────────
-
-/**
- * Subscribes to the shared Pi WebSocket state.
- * Returns { sensors, status, detections, wsStatus, sendDriveCommand }.
- *
- * Connection lifecycle is managed inside useEffect with local variables so
- * React StrictMode double-invoke is handled correctly:
- *   Mount  → useEffect runs → 300 ms timer → connect() → WS opened
- *   Unmount (StrictMode) → cleanup runs → isMounted=false, timer cleared, ws.close()
- *   Remount → useEffect runs again → fresh 300 ms timer → connect() → WS reopened
- *
- * Exponential backoff: delay = min(PI_WS_RECONNECT_MS * 2^attempt, PI_WS_MAX_RECONNECT_MS)
- * So: 1s → 2s → 4s → 8s → 10s (capped).
- *
- * Staleness: a staleTimer fires PI_WS_STALE_MS (6 s) after the last message.
- * On expiry the sensor/status state is marked with an error so the UI shows
- * "lost" without polling /api/health (which does not exist on Vercel).
- */
-export function usePiApi() {
-  const [state, setState] = useState(() => _sharedState);
-  const mountCountRef = useRef(0);
-
-  useEffect(() => {
-    _stateListeners.add(setState);
-    mountCountRef.current += 1;
-
-    if (!_piHostConfigured) {
-      _stateListeners.delete(setState);
+  ws.onmessage = (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch {
+      lastInvalid = true;
+      shared = {
+        ...shared,
+        diagnostics: { ...shared.diagnostics, invalidCount: shared.diagnostics.invalidCount + 1, wsOpen: true },
+      };
+      publish(true);
       return;
     }
 
-    // ── Local connection variables — immune to StrictMode races ─────────────
-    let ws           = null;
-    let reconnectTimer = null;
-    let staleTimer   = null;   // fires when no message for PI_WS_STALE_MS
-    let isMounted    = true;
-    let attempt      = 0;
-
-    // ── Staleness helpers ────────────────────────────────────────────────────
-
-    function armStaleTimer() {
-      clearTimeout(staleTimer);
-      staleTimer = setTimeout(() => {
-        if (!isMounted) return;
-        const msg = `No data from Pi for ${PI_WS_STALE_MS / 1000}s — connection may be lost`;
-        console.warn('[Pi]', msg);
-        patchState({
-          sensors:    { data: _sharedState.sensors.data,    loading: false, error: msg },
-          status:     { data: _sharedState.status.data,     loading: false, error: msg },
-          detections: { data: _sharedState.detections.data, loading: false, error: msg },
-          wsStatus:   WS_DISCONNECTED,
-        });
-      }, PI_WS_STALE_MS);
+    const sensors = normalizePiSensors(data);
+    if (!sensors) {
+      lastInvalid = true;
+      shared = {
+        ...shared,
+        diagnostics: { ...shared.diagnostics, invalidCount: shared.diagnostics.invalidCount + 1, wsOpen: true },
+      };
+      publish(true);
+      return;
     }
 
-    // ── Backoff helper ───────────────────────────────────────────────────────
-
-    function backoffMs() {
-      // 1s → 2s → 4s → 8s → 10s (capped at PI_WS_MAX_RECONNECT_MS)
-      return Math.min(
-        PI_WS_RECONNECT_MS * (2 ** attempt),
-        PI_WS_MAX_RECONNECT_MS,
-      );
-    }
-
-    // ── Core connect ─────────────────────────────────────────────────────────
-
-    function connect() {
-      if (!isMounted) return;
-
-      patchState({ wsStatus: WS_CONNECTING });
-
-      try {
-        ws = new WebSocket(PI_WS_URL);
-      } catch (err) {
-        console.error('[Pi] WebSocket constructor error', err);
-        scheduleReconnect();
-        return;
-      }
-
-      ws.onopen = () => {
-        attempt = 0;
-        console.log('[Pi] WebSocket connected →', PI_WS_URL);
-        patchState({ wsStatus: WS_CONNECTED });
-        armStaleTimer(); // start the inactivity watchdog
-      };
-
-      ws.onmessage = (e) => {
-        armStaleTimer(); // reset watchdog on every incoming frame
-        try {
-          const data = JSON.parse(e.data);
-          patchState({
-            sensors:    { data: normalizePiSensors(data), loading: false, error: null },
-            status:     { data: normalizePiStatus(data),  loading: false, error: null },
-            detections: {
-              data: normalizePiDetections(data.detections ?? null),
-              loading: false,
-              error: null,
-            },
-            wsStatus: WS_CONNECTED,
-          });
-        } catch (err) {
-          console.error('[Pi] JSON parse error', err);
-        }
-      };
-
-      ws.onerror = () => {
-        // onerror always fires before onclose — let onclose own the reconnect
-        // so we do not schedule two reconnects for one failure.
-        // Update the error state here so the UI reflects the problem immediately.
-        const msg = `Cannot reach Pi at ${PI_WS_URL}`;
-        patchState({
-          sensors:    { data: null, loading: false, error: msg },
-          status:     { data: null, loading: false, error: msg },
-          detections: { data: null, loading: false, error: msg },
-          wsStatus:   WS_DISCONNECTED,
-        });
-      };
-
-      ws.onclose = () => {
-        clearTimeout(staleTimer); // stop watchdog; we know it's gone
-        const delay = backoffMs();
-        attempt += 1;
-        console.log(
-          `[Pi] WebSocket closed — reconnecting in ${(delay / 1000).toFixed(1)}s` +
-          ` (attempt ${attempt}, backoff capped at ${PI_WS_MAX_RECONNECT_MS / 1000}s)`,
-        );
-        patchState({ wsStatus: WS_DISCONNECTED });
-        scheduleReconnect(delay);
-      };
-    }
-
-    function scheduleReconnect(delay = PI_WS_RECONNECT_MS) {
-      if (!isMounted) return;
-      reconnectTimer = setTimeout(connect, delay);
-    }
-
-    // 300 ms initial delay before first connect attempt.
-    // Short enough that StrictMode's unmount cancels it before it fires,
-    // so the real mount starts with a clean slate.
-    reconnectTimer = setTimeout(connect, 300);
-
-    // ── Cleanup ─────────────────────────────────────────────────────────────
-    return () => {
-      isMounted = false;
-      clearTimeout(reconnectTimer);
-      clearTimeout(staleTimer);
-      _stateListeners.delete(setState);
-
-      if (ws) {
-        // Null all handlers so onclose cannot schedule a reconnect after cleanup.
-        ws.onclose   = null;
-        ws.onerror   = null;
-        ws.onmessage = null;
-        ws.onopen    = null;
-        if (
-          ws.readyState === WebSocket.OPEN ||
-          ws.readyState === WebSocket.CONNECTING
-        ) {
-          ws.close();
-        }
-        ws = null;
-      }
-
-      // Reset shared state when the last consumer unmounts, so the next mount
-      // starts with a loading indicator rather than stale data.
-      if (_stateListeners.size === 0) {
-        _sharedState = getInitialState();
-      }
+    const now = Date.now();
+    const intervalMs = lastGoodAt ? now - lastGoodAt : shared.diagnostics.intervalMs;
+    lastGoodAt = now;
+    lastInvalid = false;
+    sensors.updatedAt = now;
+    shared = {
+      sensors: { data: sensors, loading: false, error: null },
+      status: { data: normalizePiStatus(data), loading: false, error: null },
+      detections: {
+        data: normalizePiDetections(data.detections ?? null),
+        loading: false,
+        error: null,
+      },
+      link: 'live',
+      diagnostics: {
+        lastMessageAt: now,
+        intervalMs,
+        reconnects: shared.diagnostics.reconnects,
+        invalidCount: shared.diagnostics.invalidCount,
+        wsOpen: true,
+      },
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return {
-    sensors:          state.sensors,
-    status:           state.status,
-    detections:       state.detections,
-    wsStatus:         state.wsStatus,
-    sendDriveCommand,
-    sendArmCommand,
+    publish(true);
   };
+
+  ws.onerror = () => {
+    // onclose owns reconnect. Keep the last sample.
+  };
+
+  ws.onclose = () => {
+    ws = null;
+    shared = {
+      ...shared,
+      diagnostics: { ...shared.diagnostics, reconnects: shared.diagnostics.reconnects + 1, wsOpen: false },
+    };
+    failClosed(`Cannot reach Pi at ${PI_WS_URL}`);
+    scheduleReconnect();
+  };
+}
+
+function scheduleReconnect() {
+  if (subscribers <= 0 || !PI_WS_URL) return;
+  const delay = Math.min(PI_WS_MAX_RECONNECT_MS, PI_WS_RECONNECT_MS * (2 ** Math.min(attempt, 6)));
+  attempt += 1;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    if (subscribers > 0) connect();
+  }, delay);
+}
+
+function teardown() {
+  clearTimeout(reconnectTimer);
+  clearInterval(clockTimer);
+  clockTimer = null;
+  if (ws) {
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+    ws = null;
+  }
+  wsOpen = false;
+  lastGoodAt = null;
+  lastInvalid = false;
+  attempt = 0;
+  shared = blankState();
+  publish(true);
+}
+
+function acquire(setState) {
+  listeners.add(setState);
+  setState(shared);
+  clearTimeout(teardownTimer);
+  subscribers += 1;
+  if (configured && !ws && !reconnectTimer) connect();
+  if (configured && !clockTimer) clockTimer = setInterval(() => publish(false), 1000);
+  return () => {
+    listeners.delete(setState);
+    subscribers -= 1;
+    if (subscribers <= 0) {
+      subscribers = 0;
+      teardownTimer = setTimeout(teardown, 400);
+    }
+  };
+}
+
+export function usePiApi() {
+  const [state, setState] = useState(shared);
+  useEffect(() => acquire(setState), []);
+  return state;
 }

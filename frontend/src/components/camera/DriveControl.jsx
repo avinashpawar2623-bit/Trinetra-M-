@@ -19,13 +19,14 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { sendDriveCommand } from '../../hooks/usePiApi';
+import { useControlStats } from '../../hooks/useControlStats';
 
 /** Fire-and-forget drive POST. */
 function sendDrive(speed, steer) {
   sendDriveCommand({ speed, steer, estop: false });
 }
 
-export default function DriveControl({ disabled = false, driveSpeed = 70 }) {
+export default function DriveControl({ disabled = false, driveSpeed = 70, link = 'disconnected' }) {
   const [estop, setEstop] = useState(false);
   // For UI highlight: which keys are currently held
   const [heldKeys, setHeldKeys] = useState({
@@ -135,6 +136,7 @@ export default function DriveControl({ disabled = false, driveSpeed = 70 }) {
     };
   }
 
+  const stats = useControlStats();
   const isDisabled = disabled || estop;
   const anyHeld    = heldKeys.forward || heldKeys.backward || heldKeys.left || heldKeys.right;
   // Status label: list all active keys
@@ -152,7 +154,10 @@ export default function DriveControl({ disabled = false, driveSpeed = 70 }) {
         <div className="drive-status-inline">
           <span className={`drive-status-dot ${estop ? 'drive-dot-estop' : disabled ? 'drive-dot-offline' : anyHeld ? 'drive-dot-driving' : 'drive-dot-ok'}`} />
           <span className="drive-status-text">
-            {estop ? 'E-STOP ACTIVE' : disabled ? 'Pi offline' : anyHeld ? `DRIVING · ${heldLabel}` : 'READY'}
+            {estop ? 'E-STOP ACTIVE' : disabled ? `Link ${link}` : anyHeld ? `DRIVING · ${heldLabel}` : 'READY'}
+            {stats.lastRttMs !== null ? ` · ${stats.lastRttMs} ms` : ''}
+            {stats.upstreamRttMs !== null ? ` · rover ${stats.upstreamRttMs} ms` : ''}
+            {stats.lastError ? ` · ${stats.lastError}` : ''}
           </span>
           {estop && (
             <button type="button" className="drive-btn-lift" onClick={liftEstop}>
@@ -165,13 +170,13 @@ export default function DriveControl({ disabled = false, driveSpeed = 70 }) {
       {/* ── D-pad grid (3 columns) ── */}
       <div className="dpad" role="group" aria-label="Directional controls">
         {/* Row 1: ← ↑ → */}
-        <DPadBtn active={heldKeys.left}     disabled={isDisabled} {...btnProps('left')}>⬅️</DPadBtn>
-        <DPadBtn active={heldKeys.forward}  disabled={isDisabled} {...btnProps('forward')}>⬆️</DPadBtn>
-        <DPadBtn active={heldKeys.right}    disabled={isDisabled} {...btnProps('right')}>➡️</DPadBtn>
+        <DPadBtn label="Left" active={heldKeys.left}     disabled={isDisabled} {...btnProps('left')}>⬅️</DPadBtn>
+        <DPadBtn label="Forward" active={heldKeys.forward}  disabled={isDisabled} {...btnProps('forward')}>⬆️</DPadBtn>
+        <DPadBtn label="Right" active={heldKeys.right}    disabled={isDisabled} {...btnProps('right')}>➡️</DPadBtn>
 
         {/* Row 2: gap ↓ gap */}
         <div className="dpad-empty" />
-        <DPadBtn active={heldKeys.backward} disabled={isDisabled} {...btnProps('backward')}>⬇️</DPadBtn>
+        <DPadBtn label="Reverse" active={heldKeys.backward} disabled={isDisabled} {...btnProps('backward')}>⬇️</DPadBtn>
         <div className="dpad-empty" />
       </div>
 
@@ -191,13 +196,14 @@ export default function DriveControl({ disabled = false, driveSpeed = 70 }) {
   );
 }
 
-function DPadBtn({ active, disabled, children, ...rest }) {
+function DPadBtn({ active, disabled, children, label, ...rest }) {
   return (
     <button
       type="button"
       className={`dpad-btn ${active ? 'dpad-btn-active' : ''}`}
       disabled={disabled}
       aria-pressed={active}
+      aria-label={label}
       {...rest}
     >
       {children}

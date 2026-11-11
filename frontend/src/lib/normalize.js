@@ -105,13 +105,34 @@ export function normalizePiSensors(raw) {
     mq2: toBool(raw.mq2),
     mq6: toBool(raw.mq6),
     flame: toBool(raw.flame),
-    distanceFront: piDist(raw.dist1_cm),
-    distanceRear: piDist(raw.dist2_cm),
-    temperature: piNum(raw.temp_c),
+    pump: optionalBool(raw, ['pump', 'pump_on', 'pumpOn', 'water_pump']),
+    pumpFault: optionalBool(raw, ['pump_fault', 'pumpFault']),
+    pumpRuntimeS: optionalNumber(raw, ['pump_runtime_s', 'pumpRuntimeS']),
+    distanceFront: piDist(raw.dist1_cm ?? raw.distanceFront),
+    distanceRear: piDist(raw.dist2_cm ?? raw.distanceRear),
+    temperature: piNum(raw.temp_c ?? raw.temperature),
     humidity: piNum(raw.humidity),
     fps: toNumber(raw.fps),
-    battery: null, // Pi does not report battery
+    battery: piNum(raw.battery),
+    deviceTimestamp: toNumber(raw.timestamp ?? raw.ts),
   };
+}
+
+function optionalBool(raw, keys) {
+  for (const key of keys) {
+    if (raw[key] !== undefined && raw[key] !== null) return toBool(raw[key]);
+  }
+  return undefined;
+}
+
+function optionalNumber(raw, keys) {
+  for (const key of keys) {
+    if (raw[key] !== undefined && raw[key] !== null) {
+      const n = toNumber(raw[key]);
+      return n !== null && n >= 0 ? n : null;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -141,19 +162,22 @@ export function normalizePiDetections(raw) {
   const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.objects) ? raw.objects : []);
   const objects = list
     .map((obj) => {
-      if (!obj || typeof obj.class !== 'string') return null;
+      const label = typeof obj?.class === 'string' ? obj.class : obj?.label;
+      if (!obj || typeof label !== 'string') return null;
+      const bbox = Array.isArray(obj.bbox) ? obj.bbox.map(toNumber) : [];
+      const box = bbox.length === 4 && bbox.every((n) => n !== null) ? bbox : [0, 0, 0, 0];
       return {
-        label: obj.class,
-        confidence: toNumber(obj.conf) ?? 0,
-        bbox: [0, 0, 0, 0],
+        label,
+        confidence: toNumber(obj.conf ?? obj.confidence) ?? 0,
+        bbox: box,
       };
     })
     .filter(Boolean);
 
   return {
-    timestamp: Date.now(),
-    frameWidth: 640,
-    frameHeight: 480,
+    timestamp: toNumber(raw.timestamp) || Date.now(),
+    frameWidth: toNumber(raw.frameWidth) || 640,
+    frameHeight: toNumber(raw.frameHeight) || 480,
     objects,
   };
 }
