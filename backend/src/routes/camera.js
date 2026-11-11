@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { authenticateHeader } from '../roles.js';
+import { verifyIdToken } from '../firebaseAdmin.js';
 
 const router = Router();
 const CONNECT_TIMEOUT_MS = Number(process.env.CAMERA_CONNECT_TIMEOUT_MS) || 5000;
@@ -15,6 +17,17 @@ const CONNECT_TIMEOUT_MS = Number(process.env.CAMERA_CONNECT_TIMEOUT_MS) || 5000
  * open dashboard tab (and the companion detector) competes for that slot.
  */
 router.get('/stream', async (req, res) => {
+  if (process.env.CAMERA_PROXY_REQUIRE_AUTH === 'true') {
+    try {
+      const header = req.get('authorization') || '';
+      const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+      const decoded = token ? await verifyIdToken(token) : null;
+      authenticateHeader(header, decoded);
+    } catch (err) {
+      return res.status(err.status || 401).json({ error: err.message || 'Unauthorized' });
+    }
+  }
+
   const upstreamUrl = process.env.CAMERA_STREAM_URL;
   if (!upstreamUrl) {
     return res.status(503).json({ error: 'CAMERA_STREAM_URL is not configured on the server' });

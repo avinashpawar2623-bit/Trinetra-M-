@@ -29,6 +29,7 @@ const SENSOR_EVENTS = [
 export function useEventLogger({ detections, sensors }) {
   const lastLoggedRef = useRef({});
   const prevSensorsRef = useRef({});
+  const prevPumpRef = useRef(undefined);
 
   // Returns true (and records the time) if `key` is outside its debounce window.
   function claim(key) {
@@ -75,6 +76,15 @@ export function useEventLogger({ detections, sensors }) {
       const previous = prevSensorsRef.current[key] === true;
       if (current && !previous && claim(`${type}:${key}`)) log({ type, label, message });
       prevSensorsRef.current[key] = sensors[key];
+    }
+
+    if (sensors.pump === true || sensors.pump === false) {
+      const previousPump = prevPumpRef.current;
+      if (previousPump !== sensors.pump) {
+        if (sensors.pump === true) log({ type: 'pump', label: 'pump', message: 'Pump confirmed ON by telemetry' });
+        if (sensors.pump === false && previousPump === true) log({ type: 'pump', label: 'pump', message: 'Pump confirmed OFF by telemetry' });
+        prevPumpRef.current = sensors.pump;
+      }
     }
   }, [sensors]);
 }

@@ -265,6 +265,14 @@
     letter-spacing: 0.05em;
     text-align: center;
   }
+
+  @media (max-width: 420px) {
+    .dpad {
+      grid-template-columns: repeat(3, 56px);
+      grid-template-rows: repeat(2, 56px);
+    }
+    .dpad-btn { width: 56px; height: 56px; }
+  }
 }
 
 /* ── Rover Control Panel (wrapper + mode toggle) ───────────────────────────── */
@@ -285,7 +293,8 @@
   }  /* ── Rover Mode Toggle button (ONLINE / REMOTE) ── */
   .rover-mode-btn {
     width: 100%;
-    height: 52px;
+    min-height: 52px;
+    height: auto;
     border-radius: 14px;
     border: 2px solid #475569;
     font-size: 0.72rem;
@@ -296,7 +305,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    white-space: nowrap;
+    white-space: normal;
     overflow: hidden;
     text-overflow: ellipsis;
     padding: 0 1rem;

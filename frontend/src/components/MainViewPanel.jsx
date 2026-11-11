@@ -28,7 +28,7 @@ function readSavedTab() {
  * connection (freeing the ESP32-CAM's single stream slot), and leaving the
  * 3D tab releases the WebGL context.
  */
-export default function MainViewPanel({ sensors, online, lastSeen, detections, now }) {
+export default function MainViewPanel({ sensors, online, lastSeen, detections, now, onStreamStatus }) {
   const [tab, setTab] = useState(readSavedTab);
 
   function selectTab(id) {
@@ -62,7 +62,7 @@ export default function MainViewPanel({ sensors, online, lastSeen, detections, n
       </div>
 
       {tab === 'camera' ? (
-        <CameraPanel detections={detections} now={now} />
+        <CameraPanel detections={detections} now={now} onStreamStatus={onStreamStatus} />
       ) : (
         <Suspense fallback={<LoadingState label="Loading 3D view…" />}>
           <Rover3DView

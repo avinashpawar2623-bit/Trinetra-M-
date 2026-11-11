@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
+import { revokeServerSession, setControlRole } from '../../lib/controlClient';
 
 export default function LogoutButton({ email }) {
   const [busy, setBusy] = useState(false);
@@ -8,6 +9,8 @@ export default function LogoutButton({ email }) {
   async function handleLogout() {
     setBusy(true);
     try {
+      setControlRole('viewer');
+      await revokeServerSession().catch(() => {});
       await signOut(auth);
     } catch (err) {
       console.error('Sign-out failed:', err);
