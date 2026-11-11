@@ -11,10 +11,12 @@
  * Props:
  *   disabled – boolean, forwarded to both child controls
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import DriveControl from './DriveControl';
 import ArmControl from './ArmControl';
-import { sendModeCommand } from '../../hooks/usePiApi';
+import { sendArmCommand, sendDriveCommand, sendModeCommand, usePiApi } from '../../hooks/usePiApi';
+import { setCommandTimeoutMs } from '../../lib/controlClient';
+import { useControlStats } from '../../hooks/useControlStats';
 
 const DRIVE_SPEED_MIN     = 10;
 const DRIVE_SPEED_MAX     = 100;
@@ -25,12 +27,30 @@ const ARM_SPEED_MAX     = 10;
 const ARM_SPEED_DEFAULT = 5;
 
 export default function RoverControlPanel({ disabled = false }) {
+  const { link } = usePiApi();
+  const stats = useControlStats();
   const [mode, setMode]             = useState('drive'); // 'drive' | 'arm'
   const [driveSpeed, setDriveSpeed] = useState(DRIVE_SPEED_DEFAULT);
   const [armSpeed, setArmSpeed]     = useState(ARM_SPEED_DEFAULT);
   const [roverMode, setRoverMode]   = useState('REMOTE'); // 'REMOTE' | 'ONLINE'
+  const [timeoutMs, setTimeoutMs]   = useState(stats.timeoutMs || 350);
+  const wasLive = useRef(false);
+
+  useEffect(() => {
+    if (link === 'live') {
+      wasLive.current = true;
+      return;
+    }
+    if (!wasLive.current) return;
+    wasLive.current = false;
+    // Zero the existing command. The ESP32's documented 600 ms watchdog
+    // remains the safety path when this request cannot be delivered.
+    sendDriveCommand({ speed: 0, steer: 0, estop: false, priority: true });
+    sendArmCommand({ base: 0, arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0, speed: 0, reset: false });
+  }, [link]);
 
   const isDrive  = mode === 'drive';
+  const motionDisabled = disabled || link !== 'live';
   const isOnline = roverMode === 'ONLINE';
 
   const toggleRoverMode = async () => {
@@ -128,9 +148,32 @@ export default function RoverControlPanel({ disabled = false }) {
       )}
 
       {/* ── Control panels ───────────────────────────────────────────────── */}
+      <div className="speed-slider-row">
+        <label htmlFor="command-timeout" className="speed-label">Timeout</label>
+        <input
+          id="command-timeout"
+          type="number"
+          min={100}
+          max={2000}
+          step={50}
+          value={timeoutMs}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            setTimeoutMs(next);
+            setCommandTimeoutMs(next);
+          }}
+          className="w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+        />
+        <span className="speed-value">ms</span>
+      </div>
+      <p className="text-[11px] text-slate-500">
+        Link {link}. Gateway {stats.lastRttMs === null ? '—' : `${stats.lastRttMs} ms`} · rover ack {stats.upstreamRttMs === null ? '—' : `${stats.upstreamRttMs} ms`}.
+        {link !== 'live' ? ' Motion is held. A zero command is sent when a live link drops; the rover watchdog covers a dead link.' : ''}
+      </p>
+
       {isDrive
-        ? <DriveControl disabled={disabled} driveSpeed={driveSpeed} />
-        : <ArmControl   disabled={disabled} armSpeed={armSpeed} />
+        ? <DriveControl disabled={motionDisabled} driveSpeed={driveSpeed} link={link} />
+        : <ArmControl   disabled={motionDisabled} armSpeed={armSpeed} />
       }
     </div>
   );
