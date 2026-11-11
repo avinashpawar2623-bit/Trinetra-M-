@@ -21,8 +21,19 @@ export const PI_BASE_URL = `${_httpScheme}://${_piHost}${_portSuffix}`;
 export const PI_WS_URL = `${_wsScheme}://${_piHost}${_portSuffix}/ws`;
 /** MJPEG stream URL — used directly as <img src={...} />. */
 export const PI_STREAM_URL = `${_httpScheme}://${_piHost}${_portSuffix}/stream`;
-/** ms between WebSocket reconnect attempts after a disconnect. */
-export const PI_WS_RECONNECT_MS = 5_000;
+/**
+ * Initial WebSocket reconnect delay (ms). Doubles on each failure:
+ *   attempt 0 → 1 s, 1 → 2 s, 2 → 4 s, 3 → 8 s, 4+ → 10 s (capped).
+ */
+export const PI_WS_RECONNECT_MS = 1_000;
+/** Hard ceiling for exponential backoff (ms). */
+export const PI_WS_MAX_RECONNECT_MS = 10_000;
+/**
+ * Mark sensor data as stale after this many ms with no WebSocket message.
+ * Replaces polling /api/health (which does not exist on Vercel).
+ * Must be > the Pi's push interval (500 ms) with generous headroom.
+ */
+export const PI_WS_STALE_MS = 6_000;
 
 // ---- RTDB paths -----------------------------------------------------------
 export const RTDB_PATHS = {
