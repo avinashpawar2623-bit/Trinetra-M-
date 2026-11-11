@@ -9,7 +9,12 @@ export { resolveApiUrl };
 
 const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || '');
 export const API_BASE_URL = API_BASE;
-export const API_HEALTH_URL = resolveApiUrl('api/health', API_BASE);
+/**
+ * Absolute URL for the Express backend health endpoint, or null when
+ * VITE_API_BASE_URL is not set. Components MUST check for null before fetching —
+ * a relative '/api/health' would hit Vercel and return 404.
+ */
+export const API_HEALTH_URL = API_BASE ? resolveApiUrl('api/health', API_BASE) : null;
 
 // ---- Raspberry Pi FastAPI backend -----------------------------------------
 /**

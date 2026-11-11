@@ -10,6 +10,12 @@ export default function SystemHealth({ link, diagnostics, camera }) {
   const [backendMs, setBackendMs] = useState(null);
 
   useEffect(() => {
+    // Guard: do NOT fetch if the backend URL is not configured.
+    // API_HEALTH_URL is null when VITE_API_BASE_URL is unset, which means
+    // no Express backend is reachable. Fetching '/api/health' as a relative
+    // URL on Vercel returns 404 and floods the console.
+    if (!API_HEALTH_URL) return;
+
     let cancelled = false;
     async function probe() {
       const started = performance.now();
@@ -40,7 +46,7 @@ export default function SystemHealth({ link, diagnostics, camera }) {
         <Row label="Socket reconnects" value={String(diagnostics.reconnects)} />
         <Row label="Invalid samples" value={String(diagnostics.invalidCount)} />
         <Row label="Firebase" value={firebase} />
-        <Row label="Backend health" value={backendMs === null ? 'unavailable' : `${backendMs} ms`} />
+        <Row label="Backend health" value={!API_HEALTH_URL ? 'not configured' : backendMs === null ? 'unavailable' : `${backendMs} ms`} />
         <Row label="Command gateway" value={stats.lastRttMs === null ? 'no sample' : `${stats.lastRttMs} ms total`} />
         <Row label="Rover ack" value={stats.upstreamRttMs === null ? '—' : `${stats.upstreamRttMs} ms`} />
         <Row label="Command result" value={stats.lastError || (stats.lastStatus ? `HTTP ${stats.lastStatus}` : '—')} />
