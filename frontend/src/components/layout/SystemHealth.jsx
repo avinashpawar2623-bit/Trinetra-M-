@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_HEALTH_URL } from '../../config/constants';
 import { useFirebaseConnection } from '../../hooks/useFirebaseConnection';
 import { useControlStats } from '../../hooks/useControlStats';
 import { auth } from '../../lib/firebase';
@@ -13,7 +14,7 @@ export default function SystemHealth({ link, diagnostics, camera }) {
     async function probe() {
       const started = performance.now();
       try {
-        const response = await fetch('/api/health');
+        const response = await fetch(API_HEALTH_URL);
         if (!cancelled) setBackendMs(response.ok ? Math.round(performance.now() - started) : null);
       } catch {
         if (!cancelled) setBackendMs(null);

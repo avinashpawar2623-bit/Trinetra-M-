@@ -9,7 +9,7 @@
  * It does not delete the last reading.
  */
 import { useEffect, useState } from 'react';
-import { PI_WS_RECONNECT_MS, PI_WS_URL } from '../config/constants';
+import { PI_WS_MAX_RECONNECT_MS, PI_WS_RECONNECT_MS, PI_WS_URL } from '../config/constants';
 import { normalizePiDetections, normalizePiSensors, normalizePiStatus } from '../lib/normalize';
 import { classifyLink } from '../lib/telemetry';
 
@@ -75,6 +75,12 @@ function failClosed(message) {
 
 function connect() {
   if (subscribers <= 0 || ws) return;
+  if (!PI_WS_URL) {
+    wsOpen = false;
+    shared = { ...shared, diagnostics: { ...shared.diagnostics, wsOpen: false } };
+    publish(true);
+    return;
+  }
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   try {
@@ -157,11 +163,13 @@ function connect() {
 }
 
 function scheduleReconnect() {
-  if (subscribers <= 0) return;
-  const delay = Math.min(PI_WS_RECONNECT_MS, 500 * (2 ** Math.min(attempt, 4)));
+  if (subscribers <= 0 || !PI_WS_URL) return;
+  const delay = Math.min(PI_WS_MAX_RECONNECT_MS, PI_WS_RECONNECT_MS * (2 ** Math.min(attempt, 6)));
   attempt += 1;
   clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(connect, delay);
+  reconnectTimer = setTimeout(() => {
+    if (subscribers > 0) connect();
+  }, delay);
 }
 
 function teardown() {

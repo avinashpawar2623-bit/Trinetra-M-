@@ -3,6 +3,7 @@
  * the Firebase ID token. The browser does not talk to the Pi control port
  * and does not send a role in the body.
  */
+import { API_BASE_URL, resolveApiUrl } from '../config/constants';
 import { auth } from './firebase';
 import { canControlRover } from './rbac';
 import { createCommandGate } from './commandGate';
@@ -81,22 +82,26 @@ function submit(path, body, { priority = false } = {}) {
 }
 
 export function sendDriveCommand({ speed = 0, steer = 0, estop = false, priority = false } = {}) {
-  submit('/api/control', { speed, steer, estop }, { priority: priority || estop === true });
+  const endpoint = resolveApiUrl('api/control', API_BASE_URL);
+  submit(endpoint, { speed, steer, estop }, { priority: priority || estop === true });
 }
 
 export function sendArmCommand(command) {
   const stop = command?.base === 0 && command?.arm === 0 && command?.wrist === 0
     && command?.clawJ === 0 && command?.claw === 0 && command?.rot === 0;
-  submit('/api/arm_control', command, { priority: stop || command?.reset === true });
+  const endpoint = resolveApiUrl('api/arm_control', API_BASE_URL);
+  submit(endpoint, command, { priority: stop || command?.reset === true });
 }
 
 export function sendModeCommand(mode) {
-  submit('/api/setmode', { mode }, { priority: true });
+  const endpoint = resolveApiUrl('api/setmode', API_BASE_URL);
+  submit(endpoint, { mode }, { priority: true });
 }
 
 export async function revokeServerSession() {
   const user = auth?.currentUser;
   if (!user) return;
   const token = await user.getIdToken();
-  await fetch('/api/session/logout', { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+  const endpoint = resolveApiUrl('api/session/logout', API_BASE_URL);
+  await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
 }
