@@ -122,7 +122,8 @@ function optionalBool(raw, keys) {
   for (const key of keys) {
     if (raw[key] !== undefined && raw[key] !== null) return toBool(raw[key]);
   }
-  return undefined;
+  // Return null (not undefined) so === comparisons work predictably in consumers.
+  return null;
 }
 
 function optionalNumber(raw, keys) {

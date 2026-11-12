@@ -41,6 +41,7 @@ function blankState() {
       reconnects: 0,
       invalidCount: 0,
       wsOpen: false,
+      lastRaw: null,
     },
   };
 }
@@ -122,6 +123,11 @@ function connect() {
       return;
     }
 
+    // Dev-mode: log every raw Pi message so field names are visible in console.
+    if (import.meta.env.DEV) {
+      console.debug('[Pi /ws raw]', data);
+    }
+
     const sensors = normalizePiSensors(data);
     if (!sensors) {
       lastInvalid = true;
@@ -153,6 +159,7 @@ function connect() {
         reconnects: shared.diagnostics.reconnects,
         invalidCount: shared.diagnostics.invalidCount,
         wsOpen: true,
+        lastRaw: data,
       },
     };
     publish(true);
