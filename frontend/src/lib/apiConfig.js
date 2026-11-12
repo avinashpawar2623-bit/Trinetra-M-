@@ -30,5 +30,6 @@ export function buildPiConfig({ host = '', port = '' } = {}) {
     baseUrl,
     wsUrl: piHost ? `${wsScheme}://${piHost}${portSuffix}/ws` : '',
     streamUrl: piHost ? `${httpScheme}://${piHost}${portSuffix}/stream` : '',
+    snapshotUrl: piHost ? `${httpScheme}://${piHost}${portSuffix}/snapshot` : '',
   };
 }

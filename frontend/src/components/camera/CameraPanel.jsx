@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CAMERA_ASPECT_RATIO, OVERLAY_MIN_CONFIDENCE } from '../../config/constants';
+import { CAMERA_ASPECT_RATIO, OVERLAY_MIN_CONFIDENCE, PI_SNAPSHOT_URL } from '../../config/constants';
 import { useCameraConfig } from '../../hooks/useCameraConfig';
 import { useFullscreen } from '../../hooks/useFullscreen';
 import { usePiApi } from '../../hooks/usePiApi';
@@ -7,6 +7,7 @@ import { isDetectionFresh } from '../../lib/detections';
 import { frameFreshness } from '../../lib/telemetry';
 import CameraStream from './CameraStream';
 import LatestFrameStream from './LatestFrameStream';
+import SnapshotStream from './SnapshotStream';
 import DetectionOverlay from './DetectionOverlay';
 import DetectionSummary from './DetectionSummary';
 import CameraOffline from './CameraOffline';
@@ -45,7 +46,12 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
 
   const attemptKey = `${camera.streamUrl}|${retryKey}`;
   const offline = failedKey === attemptKey;
-  const useLatest = mode === 'fetch' && sameOrigin(camera.streamUrl) && !offline;
+
+  // For cross-origin URLs (Tailscale Funnel), use snapshot polling to avoid
+  // the 1–3 s MJPEG buffering delay. Snapshot URL mirrors the stream host.
+  const crossOrigin = !sameOrigin(camera.streamUrl);
+  const useSnapshot = crossOrigin && PI_SNAPSHOT_URL && !offline;
+  const useLatest   = mode === 'fetch' && sameOrigin(camera.streamUrl) && !offline && !useSnapshot;
 
   useEffect(() => {
     setMode(sameOrigin(camera.streamUrl) ? 'fetch' : 'img');
@@ -73,13 +79,15 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
   const freshness = frameFreshness(frameAt, now);
   const streamLabel = offline
     ? `offline · ${reconnects} reconnects`
-    : useLatest
-      ? `latest frame · ${freshness}`
-      : `direct stream · ${reconnects} reconnects`;
+    : useSnapshot
+      ? `snapshot · ${freshness}`
+      : useLatest
+        ? `latest frame · ${freshness}`
+        : `direct stream · ${reconnects} reconnects`;
 
   useEffect(() => {
-    onStreamStatus?.({ label: streamLabel, reconnects, freshness: useLatest ? freshness : 'unknown' });
-  }, [onStreamStatus, streamLabel, reconnects, freshness, useLatest]);
+    onStreamStatus?.({ label: streamLabel, reconnects, freshness: (useLatest || useSnapshot) ? freshness : 'unknown' });
+  }, [onStreamStatus, streamLabel, reconnects, freshness, useLatest, useSnapshot]);
 
   return (
     <div className="space-y-3">
@@ -121,7 +129,19 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
           <CameraOffline url={camera.streamUrl} onRetry={() => { setRetryKey((key) => key + 1); setFailedKey(null); }} />
         ) : (
           <>
-            {useLatest ? (
+            {useSnapshot ? (
+              <>
+                <SnapshotStream
+                  snapshotUrl={PI_SNAPSHOT_URL}
+                  intervalMs={100}
+                  onFrame={(url, at) => { setFrameUrl(url); setFrameAt(at); }}
+                  onError={() => setFailedKey(attemptKey)}
+                />
+                {frameUrl && (
+                  <img src={frameUrl} alt="Live rover camera stream" className="absolute inset-0 h-full w-full object-contain" draggable={false} />
+                )}
+              </>
+            ) : useLatest ? (
               <>
                 <LatestFrameStream
                   url={camera.streamUrl}

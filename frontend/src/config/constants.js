@@ -31,6 +31,8 @@ export const PI_BASE_URL = piConfig.baseUrl;
 export const PI_WS_URL = piConfig.wsUrl;
 /** MJPEG stream URL — used directly as <img src={...} />. */
 export const PI_STREAM_URL = piConfig.streamUrl;
+/** Single-JPEG snapshot URL — polled at ~10 fps as low-latency alternative to MJPEG. */
+export const PI_SNAPSHOT_URL = piConfig.snapshotUrl;
 /**
  * Initial WebSocket reconnect delay (ms). Doubles on each failure:
  *   attempt 0 → 500 ms, 1 → 1 s, 2 → 2 s, … capped at PI_WS_MAX_RECONNECT_MS.
