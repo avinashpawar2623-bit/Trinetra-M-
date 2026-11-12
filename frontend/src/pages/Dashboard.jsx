@@ -17,7 +17,6 @@ import ClimatePanel from '../components/sensors/ClimatePanel';
 import WaterPumpCard from '../components/sensors/WaterPumpCard';
 import MainViewPanel from '../components/MainViewPanel';
 import EventLog from '../components/events/EventLog';
-import FireSuppressionPanel from '../components/suppression/FireSuppressionPanel';
 import SystemHealth from '../components/layout/SystemHealth';
 import SensorDebugPanel from '../components/layout/SensorDebugPanel';
 const RoverControlPanel = lazy(() => import('../components/camera/RoverControlPanel'));
@@ -94,8 +93,6 @@ export default function Dashboard({ headerActions, role, navigate, sessionError 
           <GasFlamePanel sensors={sensors.data} online={status.loading ? null : online} />
           <WaterPumpCard sensors={sensors.data} link={link} now={now} />
           <DistancePanel sensors={sensors.data} />
-          <WaterPumpCard sensors={sensors.data} link={link} />
-          <FireSuppressionPanel sensors={sensors.data} link={link} now={now} />
           <section id="events">
             <EventLog now={now} />
           </section>
