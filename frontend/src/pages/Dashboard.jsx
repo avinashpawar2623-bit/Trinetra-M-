@@ -14,6 +14,7 @@ import ErrorState from '../components/layout/ErrorState';
 import GasFlamePanel from '../components/sensors/GasFlamePanel';
 import DistancePanel from '../components/sensors/DistancePanel';
 import ClimatePanel from '../components/sensors/ClimatePanel';
+import WaterPumpCard from '../components/sensors/WaterPumpCard';
 import MainViewPanel from '../components/MainViewPanel';
 import EventLog from '../components/events/EventLog';
 import FireSuppressionPanel from '../components/suppression/FireSuppressionPanel';
@@ -91,6 +92,7 @@ export default function Dashboard({ headerActions, role, navigate, sessionError 
           {status.error && <ErrorState title="Status feed error" message={status.error} />}
           <GasFlamePanel sensors={sensors.data} online={status.loading ? null : online} />
           <DistancePanel sensors={sensors.data} />
+          <WaterPumpCard sensors={sensors.data} link={link} />
           <FireSuppressionPanel sensors={sensors.data} link={link} now={now} />
           <section id="events">
             <EventLog now={now} />
