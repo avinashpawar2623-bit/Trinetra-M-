@@ -44,7 +44,9 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
   driveSpeedRef.current = driveSpeed;
   disabledRef.current = disabled;
 
-  // ── One shared interval — reads pressedRef every 80 ms ─────────────────────
+  // ── One shared interval — reads pressedRef every 200 ms ─────────────────────
+  // The ESP32 watchdog is 600 ms. We send every 200 ms so at least one command
+  // lands within any 600 ms window even if one is lost in transit.
   useEffect(() => {
     const interval = setInterval(() => {
       if (estopRef.current || disabledRef.current) return;
@@ -59,7 +61,7 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
       if (p.right)    steer =  100;
 
       sendDrive(speed, steer);
-    }, 80);
+    }, 200);
     return () => clearInterval(interval);
   }, []); // mount once — reads refs, never stale
 

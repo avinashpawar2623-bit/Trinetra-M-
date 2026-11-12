@@ -25,6 +25,7 @@ import { normalizePiDetections, normalizePiSensors, normalizePiStatus } from '..
 import { classifyLink } from '../lib/telemetry';
 
 export { sendArmCommand, sendDriveCommand, sendModeCommand } from '../lib/controlClient';
+import { sendModeCommand } from '../lib/controlClient';
 
 const configured = Boolean(PI_WS_URL);
 
@@ -107,6 +108,9 @@ function connect() {
     attempt = 0;
     shared = { ...shared, diagnostics: { ...shared.diagnostics, wsOpen: true } };
     publish(true);
+    // Put rover into dashboard control mode immediately on connect.
+    // Fire-and-forget — if it fails the user can toggle manually.
+    sendModeCommand('ONLINE');
   };
 
   ws.onmessage = (event) => {
