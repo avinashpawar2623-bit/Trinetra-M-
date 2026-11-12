@@ -31,24 +31,42 @@ export default function FireSuppressionPanel({ sensors, link, now }) {
   const view = deriveSuppression({ sensors, link });
   const observed = observedRuntimeMs(timeline, now);
   const runtimeLabel = view.reportedRuntime !== null ? 'Reported runtime' : 'Observed this session';
-  const runtime = view.reportedRuntime !== null ? `${view.reportedRuntime}s` : formatRun(view.pumpState === 'ON' ? observed : null);
+  const isOn = view.pumpState === 'ON' || view.pumpState === 'ON (stale)';
+  const runtime =
+    view.reportedRuntime !== null
+      ? `${view.reportedRuntime}s`
+      : formatRun(isOn ? observed : null);
+
   const alert = view.fire === 'DETECTED';
 
   return (
-    <section id="suppression" className={`card space-y-3 ${alert ? 'card-alert' : ''}`} aria-label="Fire suppression">
+    <section
+      id="suppression"
+      className={`card space-y-3 ${alert ? 'card-alert' : ''}`}
+      aria-label="Fire suppression"
+    >
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Fire suppression</h2>
-        <span className={`rounded px-2 py-0.5 text-[10px] font-bold tracking-wide ${tone(view.system)}`}>{view.system}</span>
+        <span className={`rounded px-2 py-0.5 text-[10px] font-bold tracking-wide ${tone(view.system)}`}>
+          {view.system}
+        </span>
       </div>
 
       {alert && (
-        <p className="rounded-md border border-red-500/50 bg-red-950/50 px-3 py-2 text-sm font-semibold text-red-200" role="alert">
-          Fire detected. Pump state is shown only when the rover confirms it.
+        <p
+          className="rounded-md border border-red-500/50 bg-red-950/50 px-3 py-2 text-sm font-semibold text-red-200 motion-safe:animate-pulse"
+          role="alert"
+        >
+          🔥 Fire detected — {isOn ? 'pump is running.' : 'waiting for pump confirmation from rover.'}
         </p>
       )}
 
       <dl className="grid grid-cols-2 gap-3 text-sm">
-        <Reading label="Fire" value={view.fire} />
+        <Reading
+          label="Fire"
+          value={view.fire}
+          valueClass={alert ? 'text-red-300 font-bold' : view.fire === 'CLEAR' ? 'text-emerald-400' : ''}
+        />
         <Reading label="Pump" value={view.pumpState} />
         <Reading label="Last confirmed ON" value={stamp(timeline?.lastOnAt)} />
         <Reading label="Last confirmed OFF" value={stamp(timeline?.lastOffAt)} />
@@ -62,17 +80,18 @@ export default function FireSuppressionPanel({ sensors, link, now }) {
   );
 }
 
-function Reading({ label, value }) {
+function Reading({ label, value, valueClass = 'text-slate-100' }) {
   return (
     <div className="rounded-md border border-white/10 bg-slate-950/40 px-3 py-2">
       <dt className="text-[10px] uppercase tracking-wider text-slate-500">{label}</dt>
-      <dd className="mt-1 font-mono text-sm text-slate-100">{value}</dd>
+      <dd className={`mt-1 font-mono text-sm ${valueClass}`}>{value}</dd>
     </div>
   );
 }
 
 function tone(system) {
   if (system === 'ACTIVE') return 'bg-red-600 text-white';
+  if (system === 'SUPPRESSING') return 'bg-orange-500/30 text-orange-200 border border-orange-500/40';
   if (system === 'FAULT') return 'bg-amber-500/20 text-amber-200';
   return 'bg-slate-800 text-slate-300';
 }

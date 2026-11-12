@@ -102,9 +102,9 @@ export function normalizePiSensors(raw) {
   }
 
   return {
-    mq2: toBool(raw.mq2),
-    mq6: toBool(raw.mq6),
-    flame: toBool(raw.flame),
+    mq2: optionalBool(raw, ['mq2', 'mq2_alert', 'gas_mq2']),
+    mq6: optionalBool(raw, ['mq6', 'mq6_alert', 'gas_mq6']),
+    flame: optionalBool(raw, ['flame', 'fire', 'flame_detected', 'fire_detected', 'flameDetected', 'fireDetected']),
     pump: optionalBool(raw, ['pump', 'pump_on', 'pumpOn', 'water_pump']),
     pumpFault: optionalBool(raw, ['pump_fault', 'pumpFault']),
     pumpRuntimeS: optionalNumber(raw, ['pump_runtime_s', 'pumpRuntimeS']),

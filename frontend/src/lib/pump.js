@@ -8,6 +8,8 @@
 
 export function deriveSuppression({ sensors, link }) {
   const fresh = link === 'live';
+  // Fire is reported whenever the sensor says so, regardless of link freshness.
+  // 'UNKNOWN' only when the field has never arrived (undefined/null).
   const flame = sensors?.flame;
   const pump = sensors?.pump;
   const reportedRuntime = typeof sensors?.pumpRuntimeS === 'number' ? sensors.pumpRuntimeS : null;
@@ -15,20 +17,28 @@ export function deriveSuppression({ sensors, link }) {
   let fire = 'UNKNOWN';
   if (flame === true) fire = 'DETECTED';
   else if (flame === false) fire = 'CLEAR';
+  // If sensors exist but flame field is missing, treat as UNKNOWN
+  // but if sensors is null entirely (no data yet) also UNKNOWN — that's fine.
 
+  // Pump state is only meaningful when link is live (confirmed real-time reading).
   let pumpState = 'UNKNOWN';
   if (fresh && pump === true) pumpState = 'ON';
   else if (fresh && pump === false) pumpState = 'OFF';
+  // If link is stale but we have a known pump value, still surface it as a hint.
+  else if (!fresh && pump === true) pumpState = 'ON (stale)';
+  else if (!fresh && pump === false) pumpState = 'OFF (stale)';
 
   const commsLost = link === 'disconnected' || link === 'stale' || link === 'invalid' || link === 'connecting';
   const pumpFault = sensors?.pumpFault === true;
-  const pumpInvalid = fresh && pump === null;
 
+  // System state: don't mark FAULT just because fire is UNKNOWN (no sensor data yet).
+  // Only escalate to FAULT when we have confirmed fire but no pump, or comms are lost.
   let system = 'STANDBY';
-  if (commsLost || pumpFault || pumpInvalid || fire === 'UNKNOWN') system = 'FAULT';
-  else if (fire === 'DETECTED' && pumpState === 'ON') system = 'ACTIVE';
-  else if (fire === 'DETECTED') system = 'FAULT';
-  else if (pumpState === 'ON') system = 'FAULT';
+  if (commsLost) system = 'FAULT';
+  else if (pumpFault) system = 'FAULT';
+  else if (fire === 'DETECTED' && (pumpState === 'ON' || pumpState === 'ON (stale)')) system = 'ACTIVE';
+  else if (fire === 'DETECTED') system = 'SUPPRESSING'; // fire + pump unknown/off
+  else if (pumpState === 'ON') system = 'FAULT'; // pump running with no fire
   else system = 'STANDBY';
 
   return {
