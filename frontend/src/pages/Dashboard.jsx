@@ -19,6 +19,7 @@ import MainViewPanel from '../components/MainViewPanel';
 import EventLog from '../components/events/EventLog';
 import FireSuppressionPanel from '../components/suppression/FireSuppressionPanel';
 import SystemHealth from '../components/layout/SystemHealth';
+import WaterPumpCard from '../components/sensors/WaterPumpCard';
 const RoverControlPanel = lazy(() => import('../components/camera/RoverControlPanel'));
 
 export default function Dashboard({ headerActions, role, navigate, sessionError }) {
@@ -91,6 +92,7 @@ export default function Dashboard({ headerActions, role, navigate, sessionError 
         <aside className="space-y-4">
           {status.error && <ErrorState title="Status feed error" message={status.error} />}
           <GasFlamePanel sensors={sensors.data} online={status.loading ? null : online} />
+          <WaterPumpCard sensors={sensors.data} link={link} now={now} />
           <DistancePanel sensors={sensors.data} />
           <WaterPumpCard sensors={sensors.data} link={link} />
           <FireSuppressionPanel sensors={sensors.data} link={link} now={now} />
