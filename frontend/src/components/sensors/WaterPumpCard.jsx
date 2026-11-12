@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from 'react';
 import {
   deriveSuppression,
@@ -50,6 +51,11 @@ export default function WaterPumpCard({ sensors, link, now }) {
   const fireClear = view.fire === 'CLEAR';
   const isOn = view.pumpState === 'ON' || view.pumpState === 'ON (stale)';
   const isOff = view.pumpState === 'OFF' || view.pumpState === 'OFF (stale)';
+  const isOn = view.pumpState === 'ON';
+  const isOff = view.pumpState === 'OFF';
+  const isUnknown = view.pumpState === 'UNKNOWN';
+
+  const fault = sensors?.pumpFault === true;
 
   const observed = observedRuntimeMs(timeline, now);
   const runtimeMs =
@@ -64,6 +70,24 @@ export default function WaterPumpCard({ sensors, link, now }) {
   const commsPill = view.fresh
     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
     : 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
+
+  const runtimeMs =
+    view.reportedRuntime !== null
+      ? view.reportedRuntime * 1000
+      : isOn
+      ? observed
+      : null;
+
+  const runtimeLabel =
+    view.reportedRuntime !== null
+      ? 'Reported runtime'
+      : 'Session runtime';
+
+  const indicatorRing = isOn
+    ? 'ring-2 ring-cyan-400/60 shadow-[0_0_20px_4px_rgba(34,211,238,0.35)]'
+    : isOff
+    ? 'ring-2 ring-slate-600/50'
+    : 'ring-2 ring-slate-700/40';
 
   // ── Pump bulb colours ───────────────────────────────────────────────────────
   const bulbColor = isOn
@@ -80,6 +104,13 @@ export default function WaterPumpCard({ sensors, link, now }) {
 
   const pumpStatusText = isOn ? 'RUNNING' : isOff ? 'IDLE' : 'NO DATA';
   const pumpStatusColor = isOn
+  const statusText = isOn
+    ? 'RUNNING'
+    : isOff
+    ? 'IDLE'
+    : 'NO DATA';
+
+  const statusTextColor = isOn
     ? 'text-cyan-300'
     : isOff
     ? 'text-slate-400'
@@ -97,6 +128,13 @@ export default function WaterPumpCard({ sensors, link, now }) {
     <Card tilt={!fireDetected && !isOn} alert={fireDetected}>
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2 mb-3">
+  const commsPill = view.fresh
+    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+    : 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
+
+  return (
+    <Card tilt={!isOn}>
+      <div className="flex items-center justify-between gap-2 mb-4">
         <div className="flex items-center gap-2">
           <span aria-hidden="true" className="text-lg">{fireDetected ? '🔥' : '💧'}</span>
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
@@ -115,6 +153,13 @@ export default function WaterPumpCard({ sensors, link, now }) {
 
       {/* ── Fire alert banner ──────────────────────────────────────────────── */}
       {fireDetected && (
+
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${commsPill}`}>
+          {view.fresh ? 'LIVE' : view.comms.toUpperCase()}
+        </span>
+      </div>
+
+      <div className="flex flex-col items-center gap-3 py-3">
         <div
           role="alert"
           className="mb-3 flex items-center gap-2 rounded-md border border-red-500/60 bg-red-950/60 px-3 py-2.5 motion-safe:animate-pulse"
@@ -185,6 +230,28 @@ export default function WaterPumpCard({ sensors, link, now }) {
           }
         />
         <Detail label="Pump" value={view.pumpState} />
+        <span className={`text-xl font-bold tracking-widest ${statusTextColor}`}>
+          {statusText}
+        </span>
+
+        {isOn && (
+          <span className="text-xs text-cyan-400/70 animate-pulse">
+            ● Pump is active
+          </span>
+        )}
+      </div>
+
+      {fault && (
+        <p
+          className="mb-3 rounded-md border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs text-red-200"
+          role="alert"
+        >
+          The rover reports a pump fault.
+        </p>
+      )}
+
+      <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
+        <Detail label="Pump state" value={view.pumpState} />
         <Detail label={runtimeLabel} value={fmt(runtimeMs)} />
         <Detail label="Last OFF" value={stamp(timeline?.lastOffAt)} />
       </dl>
@@ -201,6 +268,12 @@ function Detail({ label, value, valueClass = 'text-slate-100' }) {
     <div className="rounded-md border border-white/8 bg-slate-950/40 px-3 py-2">
       <dt className="text-[10px] uppercase tracking-wider text-slate-500">{label}</dt>
       <dd className={`mt-0.5 font-mono text-sm ${valueClass}`}>{value}</dd>
+      <dt className="text-[10px] uppercase tracking-wider text-slate-500">
+        {label}
+      </dt>
+      <dd className="mt-0.5 font-mono text-sm text-slate-100">
+        {value}
+      </dd>
     </div>
   );
 }

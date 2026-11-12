@@ -94,6 +94,7 @@ export default function Dashboard({ headerActions, role, navigate, sessionError 
           <GasFlamePanel sensors={sensors.data} online={status.loading ? null : online} />
           <WaterPumpCard sensors={sensors.data} link={link} now={now} />
           <DistancePanel sensors={sensors.data} />
+          <WaterPumpCard sensors={sensors.data} link={link} />
           <FireSuppressionPanel sensors={sensors.data} link={link} now={now} />
           <section id="events">
             <EventLog now={now} />
