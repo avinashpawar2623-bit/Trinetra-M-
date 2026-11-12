@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from 'react';
 import {
   deriveSuppression,
@@ -51,8 +50,6 @@ export default function WaterPumpCard({ sensors, link, now }) {
   const fireClear = view.fire === 'CLEAR';
   const isOn = view.pumpState === 'ON' || view.pumpState === 'ON (stale)';
   const isOff = view.pumpState === 'OFF' || view.pumpState === 'OFF (stale)';
-  const isOn = view.pumpState === 'ON';
-  const isOff = view.pumpState === 'OFF';
   const isUnknown = view.pumpState === 'UNKNOWN';
 
   const fault = sensors?.pumpFault === true;
@@ -66,22 +63,9 @@ export default function WaterPumpCard({ sensors, link, now }) {
       : null;
   const runtimeLabel = view.reportedRuntime !== null ? 'Reported runtime' : 'Session runtime';
 
-  // ── Comms pill ─────────────────────────────────────────────────────────────
   const commsPill = view.fresh
     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
     : 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
-
-  const runtimeMs =
-    view.reportedRuntime !== null
-      ? view.reportedRuntime * 1000
-      : isOn
-      ? observed
-      : null;
-
-  const runtimeLabel =
-    view.reportedRuntime !== null
-      ? 'Reported runtime'
-      : 'Session runtime';
 
   const indicatorRing = isOn
     ? 'ring-2 ring-cyan-400/60 shadow-[0_0_20px_4px_rgba(34,211,238,0.35)]'
@@ -89,58 +73,45 @@ export default function WaterPumpCard({ sensors, link, now }) {
     ? 'ring-2 ring-slate-600/50'
     : 'ring-2 ring-slate-700/40';
 
-  // ── Pump bulb colours ───────────────────────────────────────────────────────
   const bulbColor = isOn
     ? 'bg-cyan-400 shadow-[0_0_18px_6px_rgba(34,211,238,0.6)]'
     : isOff
     ? 'bg-slate-600'
     : 'bg-slate-700';
 
-  const indicatorRing = isOn
-    ? 'ring-2 ring-cyan-400/60 shadow-[0_0_20px_4px_rgba(34,211,238,0.35)]'
-    : isOff
-    ? 'ring-2 ring-slate-600/50'
-    : 'ring-2 ring-slate-700/40';
-
   const pumpStatusText = isOn ? 'RUNNING' : isOff ? 'IDLE' : 'NO DATA';
   const pumpStatusColor = isOn
-  const statusText = isOn
-    ? 'RUNNING'
+    ? 'text-cyan-300'
     : isOff
-    ? 'IDLE'
-    : 'NO DATA';
+    ? 'text-slate-400'
+    : 'text-slate-500';
 
+  const statusText = isOn ? 'RUNNING' : isOff ? 'IDLE' : 'NO DATA';
   const statusTextColor = isOn
     ? 'text-cyan-300'
     : isOff
     ? 'text-slate-400'
     : 'text-slate-500';
 
-  // ── System badge ────────────────────────────────────────────────────────────
   const systemBadge = {
-    ACTIVE:      'bg-red-600 text-white',
+    ACTIVE: 'bg-red-600 text-white',
     SUPPRESSING: 'bg-orange-500/30 text-orange-200 border border-orange-500/40',
-    FAULT:       'bg-amber-500/20 text-amber-200',
-    STANDBY:     'bg-slate-800 text-slate-300',
+    FAULT: 'bg-amber-500/20 text-amber-200',
+    STANDBY: 'bg-slate-800 text-slate-300',
   }[view.system] ?? 'bg-slate-800 text-slate-300';
 
   return (
     <Card tilt={!fireDetected && !isOn} alert={fireDetected}>
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-2 mb-3">
-  const commsPill = view.fresh
-    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-    : 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
-
-  return (
-    <Card tilt={!isOn}>
       <div className="flex items-center justify-between gap-2 mb-4">
         <div className="flex items-center gap-2">
-          <span aria-hidden="true" className="text-lg">{fireDetected ? '🔥' : '💧'}</span>
+          <span aria-hidden="true" className="text-lg">
+            {fireDetected ? '🔥' : '💧'}
+          </span>
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
             Water Pump
           </h2>
         </div>
+
         <div className="flex items-center gap-1.5">
           <span className={`rounded px-2 py-0.5 text-[10px] font-bold tracking-wide ${systemBadge}`}>
             {view.system}
@@ -151,20 +122,14 @@ export default function WaterPumpCard({ sensors, link, now }) {
         </div>
       </div>
 
-      {/* ── Fire alert banner ──────────────────────────────────────────────── */}
       {fireDetected && (
-
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${commsPill}`}>
-          {view.fresh ? 'LIVE' : view.comms.toUpperCase()}
-        </span>
-      </div>
-
-      <div className="flex flex-col items-center gap-3 py-3">
         <div
           role="alert"
           className="mb-3 flex items-center gap-2 rounded-md border border-red-500/60 bg-red-950/60 px-3 py-2.5 motion-safe:animate-pulse"
         >
-          <span className="text-base" aria-hidden="true">🔥</span>
+          <span className="text-base" aria-hidden="true">
+            🔥
+          </span>
           <div>
             <p className="text-sm font-bold text-red-200">FIRE DETECTED</p>
             <p className="text-[11px] text-red-400">
@@ -178,14 +143,14 @@ export default function WaterPumpCard({ sensors, link, now }) {
 
       {fireClear && isOn && (
         <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-950/40 px-3 py-2">
-          <span className="text-base" aria-hidden="true">⚠️</span>
+          <span className="text-base" aria-hidden="true">
+            ⚠️
+          </span>
           <p className="text-xs text-amber-300">Fire clear — pump still running. Check rover.</p>
         </div>
       )}
 
-      {/* ── Pump indicator ─────────────────────────────────────────────────── */}
       <div className="flex items-center gap-4 py-2">
-        {/* Bulb */}
         <div
           className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-slate-900 transition-all duration-500 ${indicatorRing}`}
         >
@@ -196,7 +161,6 @@ export default function WaterPumpCard({ sensors, link, now }) {
           />
         </div>
 
-        {/* Text block */}
         <div className="min-w-0">
           <p className={`text-lg font-bold tracking-widest ${pumpStatusColor}`}>
             {pumpStatusText}
@@ -216,45 +180,22 @@ export default function WaterPumpCard({ sensors, link, now }) {
         </div>
       </div>
 
-      {/* ── Detail grid ────────────────────────────────────────────────────── */}
       <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-        <Detail
-          label="Fire sensor"
-          value={view.fire}
-          valueClass={
-            fireDetected
-              ? 'text-red-300 font-bold'
-              : fireClear
-              ? 'text-emerald-400'
-              : 'text-slate-400'
-          }
-        />
-        <Detail label="Pump" value={view.pumpState} />
-        <span className={`text-xl font-bold tracking-widest ${statusTextColor}`}>
-          {statusText}
-        </span>
-
-        {isOn && (
-          <span className="text-xs text-cyan-400/70 animate-pulse">
-            ● Pump is active
-          </span>
-        )}
-      </div>
+        <Detail label="Fire sensor" value={view.fire} valueClass={fireDetected ? 'text-red-300 font-bold' : fireClear ? 'text-emerald-400' : 'text-slate-400'} />
+        <Detail label="Pump state" value={view.pumpState} />
+        <Detail label={runtimeLabel} value={fmt(runtimeMs)} />
+        <Detail label="Last ON" value={stamp(timeline?.lastOnAt)} />
+        <Detail label="Last OFF" value={stamp(timeline?.lastOffAt)} />
+      </dl>
 
       {fault && (
         <p
-          className="mb-3 rounded-md border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs text-red-200"
+          className="mt-3 rounded-md border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs text-red-200"
           role="alert"
         >
           The rover reports a pump fault.
         </p>
       )}
-
-      <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
-        <Detail label="Pump state" value={view.pumpState} />
-        <Detail label={runtimeLabel} value={fmt(runtimeMs)} />
-        <Detail label="Last OFF" value={stamp(timeline?.lastOffAt)} />
-      </dl>
 
       <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
         Status reflects rover telemetry only. Suppression is controlled autonomously on the rover.
@@ -268,12 +209,6 @@ function Detail({ label, value, valueClass = 'text-slate-100' }) {
     <div className="rounded-md border border-white/8 bg-slate-950/40 px-3 py-2">
       <dt className="text-[10px] uppercase tracking-wider text-slate-500">{label}</dt>
       <dd className={`mt-0.5 font-mono text-sm ${valueClass}`}>{value}</dd>
-      <dt className="text-[10px] uppercase tracking-wider text-slate-500">
-        {label}
-      </dt>
-      <dd className="mt-0.5 font-mono text-sm text-slate-100">
-        {value}
-      </dd>
     </div>
   );
 }
