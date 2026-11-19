@@ -1,36 +1,37 @@
 /**
- * ArmControl — Verified Pi API /arm_control contract.
+ * ArmControl — Pi API /arm_control contract.
  *
  * POST /arm_control body fields (ALL are direction deltas -1 / 0 / +1):
  *   base:  elbow servo (channel 0)
  *   arm:   SHOULDER servo (channel 1)
  *   wrist: wrist servo (channel 2)
  *   clawJ: claw-joint servo (channel 3)
- *   claw:  gripper servo (channel 4)
- *   rot:   360° continuous-rotation base (channel 5)
+ *   claw:  gripper servo (channel 4)   claw>0 → CLOSE, claw<0 → OPEN
+ *   rot:   360° continuous-rotation (channel 5)   rot>0 → CW, rot<0 → CCW
  *   speed: 1–10 step speed
  *   reset: bool
  *
  * Hold pattern:
- *   onPointerDown → send payload immediately, then resend every 200ms
- *   onPointerUp / Leave / Cancel → clearInterval, send ZERO_CMD
+ *   onPointerDown → setmode ONLINE (once) + send payload immediately + setInterval 200ms
+ *   onPointerUp / Leave / Cancel → clearInterval + send ZERO_CMD
  *
- * ZERO_CMD = { base:0, arm:0, wrist:0, clawJ:0, claw:0, rot:0, speed:5 }
+ * ZERO_CMD = { base:0, arm:0, wrist:0, clawJ:0, claw:0, rot:0, speed:5, reset:false }
  *
- * Button layout:
- *   ROTATE    : [↻ CW / Q]   [↺ CCW / E]   → rot: +1 / rot: -1
- *   SHOULDER  : [▲ UP / R]   [▼ DOWN / F]  → arm: +1 / arm: -1
- *   ELBOW     : [▲ UP / T]   [▼ DOWN / G]  → base: +1 / base: -1
- *   WRIST     : [▲ UP / Y]   [▼ DOWN / H]  → wrist: +1 / wrist: -1
- *   CLAW JT   : [▲ UP / U]   [▼ DOWN / J]  → clawJ: +1 / clawJ: -1
- *   GRIPPER   : [○ OPEN / O] [● CLOSE / L] → claw: -1 / claw: +1
- *   PUMP      : [💧 PUMP / P]  (full width toggle)
+ * Button layout (6 rows, no pump):
+ *   ROTATE    : [↻ CW / Q]    [↺ CCW / E]   → rot: +1 / rot: -1
+ *   [ROT SPEED slider 1–5, default 2]
+ *   SHOULDER  : [▲ UP / R]    [▼ DOWN / F]  → arm: +1 / arm: -1
+ *   ELBOW     : [▲ UP / T]    [▼ DOWN / G]  → base: +1 / base: -1
+ *   WRIST     : [▲ UP / Y]    [▼ DOWN / H]  → wrist: +1 / wrist: -1
+ *   CLAW JT   : [▲ UP / U]    [▼ DOWN / J]  → clawJ: +1 / clawJ: -1
+ *   GRIPPER   : [○ OPEN / O]  [● CLOSE / L] → claw: -1 / claw: +1
  */
 import { useEffect, useRef, useState } from 'react';
 import { sendArmCommand } from '../../hooks/usePiApi';
 import { useKeybindings } from '../../hooks/useKeybindings';
+import { PI_BASE_URL } from '../../config/constants';
 
-const REPEAT_MS = 200; // resend every 200ms while held (rover expires 600ms)
+const REPEAT_MS = 200; // resend every 200ms (rover expires 600ms)
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 const ZERO = { base: 0, arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0, speed: 5, reset: false };
@@ -40,8 +41,20 @@ function makeCmd(overrides) {
 }
 
 function sendArm(payload) {
-  console.log('[ARM] send', JSON.stringify(payload));
+  console.log('[ARM] send payload:', JSON.stringify(payload));
+  console.log('[ARM] fetch to:', PI_BASE_URL + '/arm_control');
   sendArmCommand(payload);
+}
+
+/** POST /setmode ONLINE to put rover in dashboard control mode. */
+function sendOnlineMode() {
+  fetch(`${PI_BASE_URL}/setmode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'ONLINE' }),
+  })
+    .then(() => console.log('[ARM] ONLINE mode set'))
+    .catch(e => console.warn('[ARM] setmode failed', e));
 }
 
 function isFormField(el) {
@@ -54,32 +67,26 @@ const mobile = window.innerWidth < 768;
 
 // ─── Design constants ─────────────────────────────────────────────────────────
 const C = {
-  bgCard:    '#0d0d1a',
-  bgBtn:     'linear-gradient(145deg, #1a1a2e 0%, #12122a 100%)',
-  bgBtnHov:  'linear-gradient(145deg, #22223a 0%, #1a1a30 100%)',
-  border:    '1px solid #2a2a4a',
-  borderHov: '1px solid #4a4a7a',
-  accent:    '#6d28d9',
-  accentGlo: 'rgba(109,40,217,0.6)',
-  danger:    '#dc2626',
-  dangerGlo: 'rgba(220,38,38,0.6)',
-  success:   '#16a34a',
-  textPri:   '#e2e8f0',
-  textDim:   '#94a3b8',
-  textKey:   '#64748b',
-  radius:    '12px',
+  bgCard:   '#0d0d1a',
+  bgBtn:    'linear-gradient(145deg, #1a1a2e 0%, #12122a 100%)',
+  border:   '1px solid #2a2a4a',
+  accent:   '#6d28d9',
+  accentGlo:'rgba(109,40,217,0.6)',
+  textPri:  '#e2e8f0',
+  textDim:  '#94a3b8',
+  textKey:  '#64748b',
+  radius:   '12px',
 };
 
 // ─── Button rows ──────────────────────────────────────────────────────────────
-// Each entry defines the two buttons in a row.
-// field: the payload field driven by this button
-// dir: +1 or -1
-// bindKey: key into useKeybindings bindings object
+// ROTATE row is index 0 — receives rotSpeedRef value at press time
+// GRIPPER: claw < 0 → OPEN (fingers spread), claw > 0 → CLOSE (fingers grip)
 const ROWS = [
   {
     label: 'ROTATE',
-    neg: { icon: '↺', label: 'CCW', bindKey: 'baseCCW',     payload: makeCmd({ rot: -1 }) },
-    pos: { icon: '↻', label: 'CW',  bindKey: 'baseCW',      payload: makeCmd({ rot: +1 }) },
+    isRotate: true, // special: speed comes from rotSpeedRef, not armSpeedRef
+    neg: { icon: '↺', label: 'CCW', bindKey: 'baseCCW',      payload: makeCmd({ rot: -1 }) },
+    pos: { icon: '↻', label: 'CW',  bindKey: 'baseCW',       payload: makeCmd({ rot: +1 }) },
   },
   {
     label: 'SHOULDER',
@@ -103,8 +110,9 @@ const ROWS = [
   },
   {
     label: 'GRIPPER',
-    neg: { icon: '●', label: 'CLOSE', bindKey: 'gripperClose2', payload: makeCmd({ claw: +1 }) },
-    pos: { icon: '○', label: 'OPEN',  bindKey: 'gripperOpen2',  payload: makeCmd({ claw: -1 }) },
+    // claw: -1 → OPEN (spread), claw: +1 → CLOSE (grip)
+    neg: { icon: '○', label: 'OPEN',  bindKey: 'gripperOpen2',  payload: makeCmd({ claw: -1 }) },
+    pos: { icon: '●', label: 'CLOSE', bindKey: 'gripperClose2', payload: makeCmd({ claw: +1 }) },
   },
 ];
 
@@ -180,26 +188,43 @@ function ArmBtn({ label, icon, keyHint, held, disabled, onPress, onRelease }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ArmControl({ disabled = false, armSpeed = 5 }) {
   const { bindings } = useKeybindings();
-  const [heldId, setHeldId]   = useState(null); // which btn is held
-  const [pumpOn, setPumpOn]   = useState(false);
+  const [heldId, setHeldId] = useState(null);
+  const [rotSpeed, setRotSpeed] = useState(2); // UI state for slider display
 
-  const intervalRef  = useRef(null);
-  const heldPayRef   = useRef(null); // payload currently being repeated
-  const disabledRef  = useRef(disabled);
-  const armSpeedRef  = useRef(armSpeed);
-  const bindingsRef  = useRef(bindings);
+  const intervalRef   = useRef(null);
+  const heldPayRef    = useRef(null);
+  const disabledRef   = useRef(disabled);
+  const armSpeedRef   = useRef(armSpeed);
+  const rotSpeedRef   = useRef(2);   // 1–5, used for rot commands
+  const bindingsRef   = useRef(bindings);
+  const modeSetRef    = useRef(false); // tracks if ONLINE mode was sent this session
 
   disabledRef.current = disabled;
   armSpeedRef.current = armSpeed;
   bindingsRef.current = bindings;
 
+  // ── Send SETMODE ONLINE on mount ──────────────────────────────────────────
+  useEffect(() => {
+    sendOnlineMode();
+  }, []);
+
   // Cleanup interval on unmount
   useEffect(() => () => clearInterval(intervalRef.current), []);
 
-  function startHold(id, basePayload) {
+  // ── Re-send ONLINE mode on first button press (safety) ───────────────────
+  function ensureOnlineMode() {
+    if (!modeSetRef.current) {
+      sendOnlineMode();
+      modeSetRef.current = true;
+    }
+  }
+
+  function startHold(id, basePayload, isRotate) {
     if (disabledRef.current) return;
-    // Apply current armSpeed to payload
-    const payload = { ...basePayload, speed: armSpeedRef.current };
+    ensureOnlineMode();
+    // Use rotSpeedRef for rotation row, armSpeedRef for all others
+    const speed = isRotate ? rotSpeedRef.current : armSpeedRef.current;
+    const payload = { ...basePayload, speed };
     clearInterval(intervalRef.current);
     heldPayRef.current = payload;
     setHeldId(id);
@@ -214,7 +239,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
     intervalRef.current = null;
     heldPayRef.current = null;
     setHeldId(null);
-    sendArm({ ...ZERO, speed: armSpeedRef.current }); // immediate stop
+    sendArm({ ...ZERO, speed: armSpeedRef.current }); // stop
   }
 
   function handleReset() {
@@ -229,17 +254,14 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
   useEffect(() => {
     const heldKeys = new Set();
 
-    // Build a code → { id, payload } map from bindings + ROWS
     function buildMap(b) {
       const map = {};
       ROWS.forEach((row, ri) => {
         [row.neg, row.pos].forEach((btn, bi) => {
           const code = b[btn.bindKey];
-          if (code) map[code] = { id: `${ri}-${bi}`, payload: btn.payload };
+          if (code) map[code] = { id: `${ri}-${bi}`, payload: btn.payload, isRotate: !!row.isRotate };
         });
       });
-      // Pump toggle
-      if (b.pumpToggle) map[b.pumpToggle] = { pump: true };
       return map;
     }
 
@@ -250,8 +272,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
       if (!info || heldKeys.has(e.code)) return;
       e.preventDefault();
       heldKeys.add(e.code);
-      if (info.pump) { setPumpOn(p => !p); return; }
-      startHold(info.id, info.payload);
+      startHold(info.id, info.payload, info.isRotate);
     }
 
     function onKeyUp(e) {
@@ -259,7 +280,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
       heldKeys.delete(e.code);
       const map = buildMap(bindingsRef.current);
       const info = map[e.code];
-      if (info && !info.pump) stopHold();
+      if (info) stopHold();
     }
 
     window.addEventListener('keydown', onKeyDown);
@@ -273,11 +294,10 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
 
   function fmtKey(code) {
     if (!code) return '?';
-    const m = { ArrowUp:'↑', ArrowDown:'↓', ArrowLeft:'←', ArrowRight:'→', Space:'SPC' };
+    const m = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Space: 'SPC' };
     return m[code] || (code.startsWith('Key') ? code.slice(3) : code);
   }
 
-  // Build key-hint strings from current bindings
   function hint(bindKey) { return fmtKey(bindings[bindKey]); }
 
   const dotColor = disabled ? '#6b7280' : heldId ? '#22c55e' : '#3b82f6';
@@ -297,7 +317,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
     >
       {/* Header */}
       <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.12em', color: C.textPri, marginBottom: 12, textTransform: 'uppercase' }}>
-        🦾 ARM
+        🦾 ARM CONTROL
       </div>
 
       {/* Status dot */}
@@ -306,7 +326,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
         <span>{disabled ? '⚠ Pi offline' : heldId ? 'MOVING' : 'ARM READY'}</span>
       </div>
 
-      {/* Joint rows */}
+      {/* Joint rows with ROT SPEED slider inserted after ROTATE row */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {ROWS.map((row, ri) => (
           <div key={ri}>
@@ -314,6 +334,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
             <div style={{ fontSize: 10, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>
               {row.label}
             </div>
+
             {/* Button pair */}
             <div style={{ display: 'flex', gap: 6 }}>
               <ArmBtn
@@ -322,7 +343,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
                 keyHint={hint(row.neg.bindKey)}
                 held={heldId === `${ri}-0`}
                 disabled={disabled}
-                onPress={() => startHold(`${ri}-0`, row.neg.payload)}
+                onPress={() => startHold(`${ri}-0`, row.neg.payload, !!row.isRotate)}
                 onRelease={stopHold}
               />
               <ArmBtn
@@ -331,46 +352,42 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
                 keyHint={hint(row.pos.bindKey)}
                 held={heldId === `${ri}-1`}
                 disabled={disabled}
-                onPress={() => startHold(`${ri}-1`, row.pos.payload)}
+                onPress={() => startHold(`${ri}-1`, row.pos.payload, !!row.isRotate)}
                 onRelease={stopHold}
               />
             </div>
+
+            {/* ROT SPEED slider — inserted after ROTATE row (ri === 0) */}
+            {ri === 0 && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                marginTop: 6, padding: '6px 8px',
+                background: '#16213e', borderRadius: 8,
+              }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', whiteSpace: 'nowrap' }}>
+                  ROT SPEED
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={5}
+                  value={rotSpeed}
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setRotSpeed(v);
+                    rotSpeedRef.current = v;
+                  }}
+                  style={{ flex: 1, accentColor: C.accent, cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#a78bfa', minWidth: 14, textAlign: 'right', fontFamily: 'monospace' }}>
+                  {rotSpeed}
+                </span>
+              </div>
+            )}
           </div>
         ))}
       </div>
-
-      {/* Pump toggle */}
-      <button
-        type="button"
-        tabIndex={-1}
-        disabled={disabled}
-        onClick={() => {
-          setPumpOn(p => !p);
-          console.warn('[ARM] pump toggle not implemented — no /pump endpoint in controlClient.js');
-        }}
-        style={{
-          width: '100%',
-          marginTop: 8,
-          padding: '10px 0',
-          borderRadius: C.radius,
-          border: pumpOn ? '1px solid #1d4ed8' : C.border,
-          background: pumpOn
-            ? 'linear-gradient(145deg, #1e3a5f, #142d47)'
-            : C.bgBtn,
-          color: pumpOn ? '#93c5fd' : C.textDim,
-          fontSize: 13,
-          fontWeight: 700,
-          cursor: 'pointer',
-          letterSpacing: '0.08em',
-          boxShadow: pumpOn ? '0 0 14px rgba(29,78,216,0.5)' : 'none',
-          transition: 'box-shadow 80ms, border-color 80ms',
-          userSelect: 'none',
-          WebkitUserSelect: 'none',
-        }}
-        aria-pressed={pumpOn}
-      >
-        💧 PUMP{!mobile && <span style={{ fontSize: 9, color: C.textKey, marginLeft: 8, fontFamily: 'monospace', background: '#0a0a18', padding: '0 3px', borderRadius: 3 }}>{hint('pumpToggle')}</span>}
-      </button>
 
       {/* Reset */}
       <button
@@ -381,7 +398,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
         style={{
           width: '100%',
           padding: '7px 0',
-          marginTop: 6,
+          marginTop: 8,
           borderRadius: 10,
           border: C.border,
           background: C.bgBtn,
@@ -398,7 +415,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
 
       {!mobile && (
         <p style={{ fontSize: 10, color: '#334155', marginTop: 6, textAlign: 'center', lineHeight: 1.6 }}>
-          Q/E Rotate · R/F Shoulder · T/G Elbow · Y/H Wrist · U/J ClawJt · O/L Gripper · P Pump
+          Q/E Rotate · R/F Shoulder · T/G Elbow · Y/H Wrist · U/J ClawJt · O/L Gripper
         </p>
       )}
     </div>
