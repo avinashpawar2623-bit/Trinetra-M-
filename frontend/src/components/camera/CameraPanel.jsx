@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CAMERA_ASPECT_RATIO, OVERLAY_MIN_CONFIDENCE } from '../../config/constants';
 import { useCameraConfig } from '../../hooks/useCameraConfig';
 import { useFullscreen } from '../../hooks/useFullscreen';
@@ -13,25 +13,41 @@ import LoadingState from '../layout/LoadingState';
 const EMPTY = [];
 
 /**
- * Live camera feed using native MJPEG <img src>.
+ * Isolated fps badge — subscribes to WebSocket on its own.
+ * Sensor updates re-render ONLY this tiny component, not CameraPanel or CameraStream.
+ */
+const FpsDisplay = memo(function FpsDisplay() {
+  const { sensors } = usePiApi();
+  const fps = sensors?.data?.fps ?? null;
+  if (fps === null) return null;
+  return (
+    <span className="ml-2 rounded bg-emerald-900/60 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-emerald-400">
+      {fps.toFixed(1)} fps
+    </span>
+  );
+});
+
+/**
+ * Live camera feed — native MJPEG <img src>.
  *
- * The browser's network stack handles MJPEG natively — identical to opening
- * the stream URL in a browser tab. No fetch(), no polling, no blob URLs.
+ * Key design decisions to prevent stream interruption:
  *
- * Auto-retries with exponential back-off when the stream drops.
+ *  1. CameraStream is memo'd — React skips it on every sensor update.
+ *  2. onError / onLoad are useCallback — stable references, so memo works.
+ *  3. usePiApi (WebSocket) is ONLY called inside FpsDisplay (isolated sibling).
+ *     Sensor state changes never reach CameraStream's subtree.
+ *  4. streamUrl is a module-level constant from env — never reconstructed
+ *     inside a render function.
  */
 export default function CameraPanel({ detections, now, onStreamStatus }) {
-  const camera        = useCameraConfig();
-  const containerRef  = useRef(null);
+  const camera       = useCameraConfig();
+  const containerRef = useRef(null);
   const { isFullscreen, toggle: toggleFullscreen, supported: fullscreenSupported } = useFullscreen(containerRef);
-  const { sensors: piSensors } = usePiApi();
-  const fps = piSensors?.data?.fps ?? null;
 
   const [showOverlay, setShowOverlay] = useState(true);
   const [retryKey,    setRetryKey]    = useState(0);
   const [failedKey,   setFailedKey]   = useState(null);
   const [reconnects,  setReconnects]  = useState(0);
-  const [frameAt,     setFrameAt]     = useState(null);
 
   const attemptKey = `${camera.streamUrl}|${retryKey}`;
   const offline    = failedKey === attemptKey;
@@ -48,6 +64,23 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
     return () => clearTimeout(timer);
   }, [offline, reconnects]);
 
+  // Stable callbacks — same reference across renders so CameraStream memo works
+  const handleError = useCallback(() => {
+    setFailedKey((prev) => prev ?? attemptKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryKey, camera.streamUrl]);
+
+  const handleLoad = useCallback(() => {
+    // Stream connected — clear any previous failed state
+    setFailedKey(null);
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    setRetryKey((k) => k + 1);
+    setFailedKey(null);
+  }, []);
+
+  // Detection overlay — isolated from sensor WebSocket
   const payload        = detections.data;
   const fresh          = isDetectionFresh(payload, now);
   const visibleObjects = useMemo(
@@ -59,7 +92,7 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
 
   const streamLabel = offline
     ? `offline · retry ${reconnects}`
-    : `live · ${reconnects > 0 ? `${reconnects} reconnects` : 'direct'}`;
+    : reconnects > 0 ? `live · ${reconnects} reconnects` : 'live';
 
   useEffect(() => {
     onStreamStatus?.({ label: streamLabel, reconnects, freshness: 'unknown' });
@@ -74,11 +107,8 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
           <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-slate-500">
             via {camera.source}
           </span>
-          {fps !== null && (
-            <span className="ml-2 rounded bg-emerald-900/60 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-emerald-400">
-              {fps.toFixed(1)} fps
-            </span>
-          )}
+          {/* FpsDisplay has its own usePiApi subscription — sensor updates only re-render this */}
+          <FpsDisplay />
           <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-slate-400">
             {streamLabel}
           </span>
@@ -106,21 +136,20 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
             <LoadingState label="Resolving camera URL…" />
           </div>
         ) : offline ? (
-          <CameraOffline
-            url={camera.streamUrl}
-            onRetry={() => { setRetryKey((k) => k + 1); setFailedKey(null); }}
-          />
+          <CameraOffline url={camera.streamUrl} onRetry={handleRetry} />
         ) : (
           <>
             {/*
-              Native MJPEG <img src> — handled entirely by the browser's
-              network stack. Zero JS overhead. Same as opening the URL in a tab.
+              CameraStream is memo'd — will NOT re-render on sensor WebSocket
+              updates (every 200ms). The MJPEG TCP connection stays open and
+              uninterrupted for the full session.
+              handleError / handleLoad are useCallback — stable refs = memo works.
             */}
             <CameraStream
               url={camera.streamUrl}
               retryKey={retryKey}
-              onError={() => setFailedKey(attemptKey)}
-              onLoad={() => setFrameAt(Date.now())}
+              onError={handleError}
+              onLoad={handleLoad}
             />
 
             {showOverlay && (

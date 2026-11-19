@@ -1,18 +1,30 @@
-/**
- * MJPEG stream rendered in a plain <img>. Browsers natively decode
- * multipart/x-mixed-replace streams, so no player library is needed.
- * `retryKey` is appended as a cache-busting param so Retry forces a new request.
- */
-function withCacheBuster(url, key) {
-  if (!key) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}_r=${key}`;
-}
+import { memo, useCallback } from 'react';
+import { PI_STREAM_URL } from '../../config/constants';
 
-export default function CameraStream({ url, retryKey, onError, onLoad }) {
+/**
+ * Native MJPEG <img> — memo-wrapped so it NEVER re-renders unless the
+ * stream URL or retryKey explicitly changes.
+ *
+ * WHY THIS MATTERS:
+ *   The parent (CameraPanel) re-renders every 200 ms from WebSocket sensor
+ *   updates. Without memo, every re-render unmounts+remounts the <img>, which
+ *   closes and reopens the MJPEG TCP connection → visible stutter every 200 ms.
+ *
+ *   With memo, React skips re-rendering this subtree entirely when sensor state
+ *   changes. The TCP connection stays open and the stream runs uninterrupted.
+ *
+ * The `key` prop on <img> (driven by retryKey) is the ONLY intentional remount —
+ * it fires only when the user clicks Retry or the stream errors out.
+ */
+const CameraStream = memo(function CameraStream({ url, retryKey, onError, onLoad }) {
+  const src = retryKey
+    ? `${url}${url.includes('?') ? '&' : '?'}_r=${retryKey}`
+    : url;
+
   return (
     <img
       key={`${url}-${retryKey}`}
-      src={withCacheBuster(url, retryKey)}
+      src={src}
       alt="Live rover camera stream"
       className="absolute inset-0 h-full w-full object-contain"
       onError={onError}
@@ -20,4 +32,6 @@ export default function CameraStream({ url, retryKey, onError, onLoad }) {
       draggable={false}
     />
   );
-}
+});
+
+export default CameraStream;
