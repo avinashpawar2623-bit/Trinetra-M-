@@ -7,11 +7,14 @@
  *         [🛑 E-STOP]
  *
  * Safety:
- *   • One shared interval reads all pressed buttons every 80 ms.
+ *   • One shared interval reads all pressed buttons every 100 ms.
  *   • pressedRef tracks simultaneous keys — no stale closure.
+ *   • First command sent IMMEDIATELY on press (zero perceived latency).
  *   • Zero-speed stop sent immediately when all keys released.
  *   • E-STOP clears all state and sends estop: true.
  *   • Keyboard: WASD / Arrow keys (multi-key aware).
+ *   • Arrow keys call preventDefault — no page scroll while driving.
+ *   • Keyboard listeners bail out when focused element is input/textarea/select.
  *
  * Props:
  *   disabled    – boolean, true when Pi offline
@@ -24,6 +27,13 @@ import { useControlStats } from '../../hooks/useControlStats';
 /** Fire-and-forget drive POST. */
 function sendDrive(speed, steer) {
   sendDriveCommand({ speed, steer, estop: false });
+}
+
+/** True when the event came from a text input — skip rover hotkeys. */
+function isFormField(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
 export default function DriveControl({ disabled = false, driveSpeed = 70, link = 'disconnected' }) {
@@ -44,24 +54,28 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
   driveSpeedRef.current = driveSpeed;
   disabledRef.current = disabled;
 
-  // ── One shared interval — reads pressedRef every 200 ms ─────────────────────
-  // The ESP32 watchdog is 600 ms. We send every 200 ms so at least one command
-  // lands within any 600 ms window even if one is lost in transit.
+  // Helper: build speed/steer from pressed state
+  function computeCmd() {
+    const p = pressedRef.current;
+    let speed = 0;
+    let steer = 0;
+    if (p.forward)  speed = -driveSpeedRef.current;
+    if (p.backward) speed =  driveSpeedRef.current;
+    if (p.left)     steer = -100;
+    if (p.right)    steer =  100;
+    return { speed, steer };
+  }
+
+  // ── One shared interval — reads pressedRef every 100 ms ─────────────────────
+  // The ESP32 watchdog is 600 ms. 100 ms repeat = 6 cmds/sec → very safe.
   useEffect(() => {
     const interval = setInterval(() => {
       if (estopRef.current || disabledRef.current) return;
       const p = pressedRef.current;
       if (!p.forward && !p.backward && !p.left && !p.right) return;
-
-      let speed = 0;
-      let steer = 0;
-      if (p.forward)  speed = -driveSpeedRef.current;
-      if (p.backward) speed =  driveSpeedRef.current;
-      if (p.left)     steer = -100;
-      if (p.right)    steer =  100;
-
+      const { speed, steer } = computeCmd();
       sendDrive(speed, steer);
-    }, 200);
+    }, 100);
     return () => clearInterval(interval);
   }, []); // mount once — reads refs, never stale
 
@@ -70,6 +84,9 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     if (estopRef.current || disabledRef.current) return;
     pressedRef.current[key] = true;
     setHeldKeys(prev => ({ ...prev, [key]: true }));
+    // Send first command IMMEDIATELY — don't wait for first interval tick
+    const { speed, steer } = computeCmd();
+    sendDrive(speed, steer);
   };
 
   const release = (key) => {
@@ -87,29 +104,58 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
   // ── Keyboard: WASD / arrows (multi-key aware) ────────────────────────────────
   useEffect(() => {
     const MAP = {
-      ArrowUp: 'forward',   KeyW: 'forward',
-      ArrowDown: 'backward', KeyS: 'backward',
-      ArrowLeft: 'left',    KeyA: 'left',
-      ArrowRight: 'right',  KeyD: 'right',
+      ArrowUp:    'forward',
+      KeyW:       'forward',
+      ArrowDown:  'backward',
+      KeyS:       'backward',
+      ArrowLeft:  'left',
+      KeyA:       'left',
+      ArrowRight: 'right',
+      KeyD:       'right',
     };
+    // Keys that should prevent page scroll/slider movement
+    const PREVENT_KEYS = new Set([
+      'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
+      'KeyW', 'KeyA', 'KeyS', 'KeyD',
+    ]);
+
     const down = new Set();
+
     function onKeyDown(e) {
+      // Don't steal keys from form fields
+      if (isFormField(document.activeElement)) return;
+
+      if (PREVENT_KEYS.has(e.code)) e.preventDefault();
+
       const key = MAP[e.code];
       if (!key || down.has(e.code)) return;
       down.add(e.code);
       press(key);
+
+      // Suppress body scroll while a drive key is held
+      document.body.style.overflow = 'hidden';
     }
+
     function onKeyUp(e) {
+      if (isFormField(document.activeElement)) return;
+
       const key = MAP[e.code];
       if (!key) return;
       down.delete(e.code);
       release(key);
+
+      // Restore scroll when no drive keys held
+      if (down.size === 0) {
+        document.body.style.overflow = '';
+      }
     }
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup',   onKeyUp);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup',   onKeyUp);
+      document.body.style.overflow = ''; // always restore on unmount
     };
   }, []); // mount once — press/release read refs
 
@@ -119,6 +165,7 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     setHeldKeys({ forward: false, backward: false, left: false, right: false });
     setEstop(true);
     sendDriveCommand({ speed: 0, steer: 0, estop: true });
+    document.body.style.overflow = '';
   }
 
   function liftEstop() {
@@ -132,6 +179,7 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
       onPointerDown:  (e) => { e.currentTarget.setPointerCapture(e.pointerId); press(key); },
       onPointerUp:    ()  => release(key),
       onPointerLeave: ()  => release(key),          // safety: cursor/finger leaves button
+      onPointerCancel:()  => release(key),
       onTouchStart: (e) => { e.preventDefault(); press(key); },
       onTouchEnd:   (e) => { e.preventDefault(); release(key); },
       onTouchCancel:(e) => { e.preventDefault(); release(key); },
@@ -148,7 +196,11 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     .join(' + ');
 
   return (
-    <div className="drive-control" aria-label="Rover drive controls">
+    <div
+      className="drive-control"
+      aria-label="Rover drive controls"
+      style={{ touchAction: 'none', overscrollBehavior: 'contain', userSelect: 'none', WebkitUserSelect: 'none' }}
+    >
 
       {/* ── Panel title + status ── */}
       <div className="drive-panel-header">
@@ -172,9 +224,9 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
       {/* ── D-pad grid (3 columns) ── */}
       <div className="dpad" role="group" aria-label="Directional controls">
         {/* Row 1: ← ↑ → */}
-        <DPadBtn label="Left" active={heldKeys.left}     disabled={isDisabled} {...btnProps('left')}>⬅️</DPadBtn>
+        <DPadBtn label="Left"    active={heldKeys.left}     disabled={isDisabled} {...btnProps('left')}>⬅️</DPadBtn>
         <DPadBtn label="Forward" active={heldKeys.forward}  disabled={isDisabled} {...btnProps('forward')}>⬆️</DPadBtn>
-        <DPadBtn label="Right" active={heldKeys.right}    disabled={isDisabled} {...btnProps('right')}>➡️</DPadBtn>
+        <DPadBtn label="Right"   active={heldKeys.right}    disabled={isDisabled} {...btnProps('right')}>➡️</DPadBtn>
 
         {/* Row 2: gap ↓ gap */}
         <div className="dpad-empty" />
@@ -206,6 +258,8 @@ function DPadBtn({ active, disabled, children, label, ...rest }) {
       disabled={disabled}
       aria-pressed={active}
       aria-label={label}
+      tabIndex={-1}
+      style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
       {...rest}
     >
       {children}

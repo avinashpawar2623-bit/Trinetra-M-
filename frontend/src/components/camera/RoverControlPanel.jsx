@@ -125,6 +125,7 @@ export default function RoverControlPanel({ disabled = false }) {
             aria-valuenow={driveSpeed}
             aria-valuemin={DRIVE_SPEED_MIN}
             aria-valuemax={DRIVE_SPEED_MAX}
+            tabIndex={-1}
           />
           <span className="speed-value">{driveSpeed}%</span>
         </div>
@@ -142,6 +143,7 @@ export default function RoverControlPanel({ disabled = false }) {
             aria-valuenow={armSpeed}
             aria-valuemin={ARM_SPEED_MIN}
             aria-valuemax={ARM_SPEED_MAX}
+            tabIndex={-1}
           />
           <span className="speed-value speed-value-arm">{armSpeed}/{ARM_SPEED_MAX}</span>
         </div>
