@@ -53,8 +53,10 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
   const [frameUrl, setFrameUrl] = useState(null);
   const [frameAt, setFrameAt]   = useState(null);
 
-  // Snapshot frame timestamp — updated via callback (no src state needed)
+  // Snapshot frame timestamp + live fps counter
   const [snapFrameAt, setSnapFrameAt] = useState(null);
+  const snapFpsRef    = useRef({ count: 0, windowStart: Date.now(), fps: null });
+  const [snapFps, setSnapFps] = useState(null);
 
   const attemptKey = `${camera.streamUrl}|${retryKey}`;
   const offline    = failedKey === attemptKey;
@@ -95,7 +97,7 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
   const streamLabel   = offline
     ? `offline · ${reconnects} reconnects`
     : useSnapshot
-      ? `snapshot · ${freshness}`
+      ? `snapshot · ${freshness}${snapFps !== null ? ` · ${snapFps} fps` : ''}`
       : useLatest
         ? `latest frame · ${freshness}`
         : `direct stream · ${reconnects} reconnects`;
@@ -163,8 +165,18 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
                 <SnapshotStream
                   imgRef={snapshotImgRef}
                   snapshotUrl={PI_SNAPSHOT_URL}
-                  intervalMs={80}
-                  onFrame={(ts) => setSnapFrameAt(ts)}
+                  onFrame={(ts) => {
+                    setSnapFrameAt(ts);
+                    // Rolling fps counter over 2-second windows
+                    const r = snapFpsRef.current;
+                    r.count += 1;
+                    const elapsed = ts - r.windowStart;
+                    if (elapsed >= 2000) {
+                      setSnapFps(Math.round((r.count / elapsed) * 1000));
+                      r.count = 0;
+                      r.windowStart = ts;
+                    }
+                  }}
                   onError={() => setFailedKey(attemptKey)}
                 />
                 <img
