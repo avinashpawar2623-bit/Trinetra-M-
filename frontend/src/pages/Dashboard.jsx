@@ -19,6 +19,7 @@ import MainViewPanel from '../components/MainViewPanel';
 import EventLog from '../components/events/EventLog';
 import SystemHealth from '../components/layout/SystemHealth';
 import SensorDebugPanel from '../components/layout/SensorDebugPanel';
+import SettingsPanel from '../components/SettingsPanel';
 const RoverControlPanel = lazy(() => import('../components/camera/RoverControlPanel'));
 
 export default function Dashboard({ headerActions, role, navigate, sessionError }) {
@@ -35,6 +36,7 @@ export default function Dashboard({ headerActions, role, navigate, sessionError 
 
   return (
     <div className="min-h-screen">
+      <SettingsPanel />
       <ConnectionBanner status={status.data} loading={status.loading} now={now} />
       <Header
         online={online}

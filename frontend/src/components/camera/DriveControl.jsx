@@ -1,64 +1,210 @@
 /**
- * DriveControl — Directional drive pad for the rover.
+ * DriveControl — Redesigned game-controller-style D-pad.
  *
- * Layout: 3-column grid
- *   [ ← ]  [ ⬆️ ]  [ → ]
- *   [   ]  [ ⬇️ ]  [   ]
- *         [🛑 E-STOP]
+ * Layout:
+ *        [⬆ W]
+ *   [⬅ A] [■] [➡ D]
+ *        [⬇ S]
+ *   ─────────────────
+ *   DRIVE SPEED slider
+ *   ⛔ EMERGENCY STOP
  *
- * Safety:
- *   • One shared interval reads all pressed buttons every 100 ms.
- *   • pressedRef tracks simultaneous keys — no stale closure.
- *   • First command sent IMMEDIATELY on press (zero perceived latency).
- *   • Zero-speed stop sent immediately when all keys released.
- *   • E-STOP clears all state and sends estop: true.
- *   • Keyboard: WASD / Arrow keys (multi-key aware).
- *   • Arrow keys call preventDefault — no page scroll while driving.
- *   • Keyboard listeners bail out when focused element is input/textarea/select.
- *
- * Props:
- *   disabled    – boolean, true when Pi offline
- *   driveSpeed  – number (10–100), from RoverControlPanel
+ * Features:
+ *   • 100ms repeat interval (ESP32 watchdog 600ms, 100ms = safe)
+ *   • Immediate first command on press (zero felt latency)
+ *   • Arrow keys call preventDefault — no page scroll
+ *   • body.overflow hidden while driving, restored on key-up
+ *   • Keyboard bindings loaded from useKeybindings (remappable)
+ *   • Key badges hidden on mobile (<768px)
+ *   • user-select:none and touch-action:none on all buttons
  */
 import { useEffect, useRef, useState } from 'react';
 import { sendDriveCommand } from '../../hooks/usePiApi';
 import { useControlStats } from '../../hooks/useControlStats';
+import { useKeybindings } from '../../hooks/useKeybindings';
 
-/** Fire-and-forget drive POST. */
-function sendDrive(speed, steer) {
-  sendDriveCommand({ speed, steer, estop: false });
-}
+const isMobile = () => window.innerWidth < 768;
 
-/** True when the event came from a text input — skip rover hotkeys. */
 function isFormField(el) {
   if (!el) return false;
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
-export default function DriveControl({ disabled = false, driveSpeed = 70, link = 'disconnected' }) {
-  const [estop, setEstop] = useState(false);
-  // For UI highlight: which keys are currently held
-  const [heldKeys, setHeldKeys] = useState({
-    forward: false, backward: false, left: false, right: false,
-  });
+function sendDrive(speed, steer) {
+  sendDriveCommand({ speed, steer, estop: false });
+  if (import.meta.env.DEV) {
+    console.log('[DriveControl] send', { speed, steer });
+  }
+}
 
-  // Track pressed state in a ref so the interval never has stale closures
+// ─── Styles ──────────────────────────────────────────────────────────────────
+const S = {
+  panel: {
+    background: '#1a1a2e',
+    border: '1px solid #16213e',
+    borderRadius: 16,
+    padding: '16px 14px 14px',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    touchAction: 'none',
+    overscrollBehavior: 'contain',
+  },
+  header: {
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: '0.12em',
+    color: '#e94560',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dpadWrap: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr 1fr',
+    gridTemplateRows: '1fr 1fr',
+    gap: 6,
+    justifyItems: 'center',
+    marginBottom: 10,
+  },
+  btn: (active) => ({
+    width: isMobile() ? 72 : 64,
+    height: isMobile() ? 72 : 64,
+    minWidth: isMobile() ? 72 : 64,
+    minHeight: isMobile() ? 72 : 64,
+    borderRadius: 14,
+    border: `2px solid ${active ? '#e94560' : '#0f3460'}`,
+    background: active
+      ? 'linear-gradient(145deg, #e94560, #c73652)'
+      : 'linear-gradient(145deg, #16213e, #0f3460)',
+    color: active ? '#fff' : '#94a3b8',
+    fontSize: 22,
+    fontWeight: 700,
+    cursor: 'pointer',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    boxShadow: active
+      ? '0 0 12px #e94560, 0 2px 8px rgba(0,0,0,0.5)'
+      : '0 2px 8px rgba(0,0,0,0.4)',
+    transition: 'box-shadow 80ms, border-color 80ms, background 80ms',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    touchAction: 'none',
+  }),
+  keyBadge: {
+    fontSize: 9,
+    color: '#888',
+    background: '#111',
+    borderRadius: 4,
+    padding: '1px 4px',
+    fontFamily: 'monospace',
+    letterSpacing: '0.05em',
+  },
+  centerBtn: (active) => ({
+    width: 52,
+    height: 52,
+    minWidth: 52,
+    minHeight: 52,
+    borderRadius: 10,
+    border: `2px solid ${active ? '#e94560' : '#334155'}`,
+    background: 'linear-gradient(145deg, #1e293b, #0f172a)',
+    color: '#475569',
+    fontSize: 18,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'default',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+  }),
+  sliderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+    padding: '8px 4px',
+    background: '#16213e',
+    borderRadius: 10,
+  },
+  sliderLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    whiteSpace: 'nowrap',
+  },
+  sliderValue: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#e94560',
+    minWidth: 40,
+    textAlign: 'right',
+    fontFamily: 'monospace',
+  },
+  estopBtn: (active) => ({
+    width: '100%',
+    padding: '12px 0',
+    borderRadius: 12,
+    border: '2px solid #ef4444',
+    background: active
+      ? 'linear-gradient(145deg, #7f1d1d, #450a0a)'
+      : 'linear-gradient(145deg, #991b1b, #7f1d1d)',
+    color: '#fca5a5',
+    fontSize: 15,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    cursor: 'pointer',
+    boxShadow: active
+      ? '0 0 20px #ef4444'
+      : '0 2px 8px rgba(239,68,68,0.3)',
+    transition: 'box-shadow 80ms',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+  }),
+  statusRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+    fontSize: 11,
+    color: '#64748b',
+    fontFamily: 'monospace',
+  },
+  statusDot: (color) => ({
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: color,
+    flexShrink: 0,
+  }),
+};
+
+export default function DriveControl({ disabled = false, driveSpeed = 70, link = 'disconnected' }) {
+  const { bindings } = useKeybindings();
+  const [estop, setEstop] = useState(false);
+  const [heldKeys, setHeldKeys] = useState({ forward: false, backward: false, left: false, right: false });
+  const mobile = isMobile();
+
   const pressedRef    = useRef({ forward: false, backward: false, left: false, right: false });
   const estopRef      = useRef(false);
   const driveSpeedRef = useRef(driveSpeed);
   const disabledRef   = useRef(disabled);
+  const bindingsRef   = useRef(bindings);
 
-  // Keep refs in sync with props/state on every render
   estopRef.current    = estop;
   driveSpeedRef.current = driveSpeed;
   disabledRef.current = disabled;
+  bindingsRef.current = bindings;
 
-  // Helper: build speed/steer from pressed state
   function computeCmd() {
     const p = pressedRef.current;
-    let speed = 0;
-    let steer = 0;
+    let speed = 0, steer = 0;
     if (p.forward)  speed = -driveSpeedRef.current;
     if (p.backward) speed =  driveSpeedRef.current;
     if (p.left)     steer = -100;
@@ -66,34 +212,30 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     return { speed, steer };
   }
 
-  // ── One shared interval — reads pressedRef every 100 ms ─────────────────────
-  // The ESP32 watchdog is 600 ms. 100 ms repeat = 6 cmds/sec → very safe.
+  // ── 100ms repeat interval ─────────────────────────────────────────────────
   useEffect(() => {
-    const interval = setInterval(() => {
+    const iv = setInterval(() => {
       if (estopRef.current || disabledRef.current) return;
       const p = pressedRef.current;
       if (!p.forward && !p.backward && !p.left && !p.right) return;
       const { speed, steer } = computeCmd();
       sendDrive(speed, steer);
     }, 100);
-    return () => clearInterval(interval);
-  }, []); // mount once — reads refs, never stale
+    return () => clearInterval(iv);
+  }, []);
 
-  // ── Press / release ─────────────────────────────────────────────────────────
   const press = (key) => {
     if (estopRef.current || disabledRef.current) return;
     pressedRef.current[key] = true;
     setHeldKeys(prev => ({ ...prev, [key]: true }));
-    // Send first command IMMEDIATELY — don't wait for first interval tick
     const { speed, steer } = computeCmd();
-    sendDrive(speed, steer);
+    sendDrive(speed, steer); // immediate first command
   };
 
   const release = (key) => {
     pressedRef.current[key] = false;
     setHeldKeys(prev => {
       const next = { ...prev, [key]: false };
-      // If nothing is held anymore, send an immediate stop
       if (!next.forward && !next.backward && !next.left && !next.right) {
         if (!estopRef.current) sendDrive(0, 0);
       }
@@ -101,53 +243,39 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     });
   };
 
-  // ── Keyboard: WASD / arrows (multi-key aware) ────────────────────────────────
+  // ── Keyboard ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    const MAP = {
-      ArrowUp:    'forward',
-      KeyW:       'forward',
-      ArrowDown:  'backward',
-      KeyS:       'backward',
-      ArrowLeft:  'left',
-      KeyA:       'left',
-      ArrowRight: 'right',
-      KeyD:       'right',
-    };
-    // Keys that should prevent page scroll/slider movement
-    const PREVENT_KEYS = new Set([
+    const SCROLL_PREVENT = new Set([
       'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
-      'KeyW', 'KeyA', 'KeyS', 'KeyD',
     ]);
-
     const down = new Set();
 
+    function codeToDir(code) {
+      const b = bindingsRef.current;
+      if (code === b.driveForward   || code === b.driveForwardAlt) return 'forward';
+      if (code === b.driveBack      || code === b.driveBackAlt)    return 'backward';
+      if (code === b.driveLeft      || code === b.driveLeftAlt)    return 'left';
+      if (code === b.driveRight     || code === b.driveRightAlt)   return 'right';
+      return null;
+    }
+
     function onKeyDown(e) {
-      // Don't steal keys from form fields
       if (isFormField(document.activeElement)) return;
-
-      if (PREVENT_KEYS.has(e.code)) e.preventDefault();
-
-      const key = MAP[e.code];
-      if (!key || down.has(e.code)) return;
+      if (SCROLL_PREVENT.has(e.code)) e.preventDefault();
+      const dir = codeToDir(e.code);
+      if (!dir || down.has(e.code)) return;
       down.add(e.code);
-      press(key);
-
-      // Suppress body scroll while a drive key is held
+      press(dir);
       document.body.style.overflow = 'hidden';
     }
 
     function onKeyUp(e) {
       if (isFormField(document.activeElement)) return;
-
-      const key = MAP[e.code];
-      if (!key) return;
+      const dir = codeToDir(e.code);
+      if (!dir) return;
       down.delete(e.code);
-      release(key);
-
-      // Restore scroll when no drive keys held
-      if (down.size === 0) {
-        document.body.style.overflow = '';
-      }
+      release(dir);
+      if (down.size === 0) document.body.style.overflow = '';
     }
 
     window.addEventListener('keydown', onKeyDown);
@@ -155,11 +283,11 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup',   onKeyUp);
-      document.body.style.overflow = ''; // always restore on unmount
+      document.body.style.overflow = '';
     };
-  }, []); // mount once — press/release read refs
+  }, []);
 
-  // ── E-STOP ───────────────────────────────────────────────────────────────────
+  // ── E-STOP ────────────────────────────────────────────────────────────────
   function handleEstop() {
     pressedRef.current = { forward: false, backward: false, left: false, right: false };
     setHeldKeys({ forward: false, backward: false, left: false, right: false });
@@ -167,18 +295,16 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     sendDriveCommand({ speed: 0, steer: 0, estop: true });
     document.body.style.overflow = '';
   }
-
   function liftEstop() {
     setEstop(false);
     sendDriveCommand({ speed: 0, steer: 0, estop: false });
   }
 
-  // ── Button props helper ───────────────────────────────────────────────────────
   function btnProps(key) {
     return {
       onPointerDown:  (e) => { e.currentTarget.setPointerCapture(e.pointerId); press(key); },
       onPointerUp:    ()  => release(key),
-      onPointerLeave: ()  => release(key),          // safety: cursor/finger leaves button
+      onPointerLeave: ()  => release(key),
       onPointerCancel:()  => release(key),
       onTouchStart: (e) => { e.preventDefault(); press(key); },
       onTouchEnd:   (e) => { e.preventDefault(); release(key); },
@@ -188,81 +314,83 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
 
   const stats = useControlStats();
   const isDisabled = disabled || estop;
-  const anyHeld    = heldKeys.forward || heldKeys.backward || heldKeys.left || heldKeys.right;
-  // Status label: list all active keys
-  const heldLabel  = Object.entries(heldKeys)
-    .filter(([, v]) => v)
-    .map(([k]) => k.toUpperCase())
-    .join(' + ');
+  const anyHeld = heldKeys.forward || heldKeys.backward || heldKeys.left || heldKeys.right;
+
+  const dotColor = estop ? '#ef4444' : disabled ? '#6b7280' : anyHeld ? '#22c55e' : '#3b82f6';
+
+  const fmtKey = (code) => {
+    if (!code) return '?';
+    const m = { ArrowUp:'↑', ArrowDown:'↓', ArrowLeft:'←', ArrowRight:'→', Space:'SPC' };
+    return m[code] || (code.startsWith('Key') ? code.slice(3) : code);
+  };
 
   return (
-    <div
-      className="drive-control"
-      aria-label="Rover drive controls"
-      style={{ touchAction: 'none', overscrollBehavior: 'contain', userSelect: 'none', WebkitUserSelect: 'none' }}
-    >
+    <div style={S.panel} aria-label="Rover drive controls">
 
-      {/* ── Panel title + status ── */}
-      <div className="drive-panel-header">
-        <span className="drive-panel-title">DRIVE CONTROL</span>
-        <div className="drive-status-inline">
-          <span className={`drive-status-dot ${estop ? 'drive-dot-estop' : disabled ? 'drive-dot-offline' : anyHeld ? 'drive-dot-driving' : 'drive-dot-ok'}`} />
-          <span className="drive-status-text">
-            {estop ? 'E-STOP ACTIVE' : disabled ? `Link ${link}` : anyHeld ? `DRIVING · ${heldLabel}` : 'READY'}
-            {stats.lastRttMs !== null ? ` · ${stats.lastRttMs} ms` : ''}
-            {stats.upstreamRttMs !== null ? ` · rover ${stats.upstreamRttMs} ms` : ''}
-            {stats.lastError ? ` · ${stats.lastError}` : ''}
-          </span>
-          {estop && (
-            <button type="button" className="drive-btn-lift" onClick={liftEstop}>
-              Lift E-Stop
-            </button>
-          )}
-        </div>
+      {/* Header */}
+      <div style={S.header}>🚗 DRIVE CONTROL</div>
+
+      {/* Status row */}
+      <div style={S.statusRow}>
+        <div style={S.statusDot(dotColor)} />
+        <span>
+          {estop ? 'E-STOP ACTIVE' : disabled ? `Link ${link}` : anyHeld ? 'DRIVING' : 'READY'}
+          {stats.lastRttMs !== null ? ` · ${stats.lastRttMs}ms` : ''}
+          {stats.lastError ? ` · ${stats.lastError}` : ''}
+        </span>
+        {estop && (
+          <button type="button" onClick={liftEstop}
+            style={{ marginLeft: 'auto', padding: '2px 8px', borderRadius: 6, border: '1px solid #ef4444', background: 'transparent', color: '#fca5a5', fontSize: 11, cursor: 'pointer' }}>
+            Lift E-Stop
+          </button>
+        )}
       </div>
 
-      {/* ── D-pad grid (3 columns) ── */}
-      <div className="dpad" role="group" aria-label="Directional controls">
-        {/* Row 1: ← ↑ → */}
-        <DPadBtn label="Left"    active={heldKeys.left}     disabled={isDisabled} {...btnProps('left')}>⬅️</DPadBtn>
-        <DPadBtn label="Forward" active={heldKeys.forward}  disabled={isDisabled} {...btnProps('forward')}>⬆️</DPadBtn>
-        <DPadBtn label="Right"   active={heldKeys.right}    disabled={isDisabled} {...btnProps('right')}>➡️</DPadBtn>
+      {/* D-pad */}
+      <div style={S.dpadWrap}>
+        {/* Row 1: empty | Up | empty */}
+        <div />
+        <button type="button" disabled={isDisabled} style={S.btn(heldKeys.forward)} {...btnProps('forward')} tabIndex={-1}>
+          ⬆
+          {!mobile && <span style={S.keyBadge}>{fmtKey(bindings.driveForward)}/{fmtKey(bindings.driveForwardAlt)}</span>}
+        </button>
+        <div />
 
-        {/* Row 2: gap ↓ gap */}
-        <div className="dpad-empty" />
-        <DPadBtn label="Reverse" active={heldKeys.backward} disabled={isDisabled} {...btnProps('backward')}>⬇️</DPadBtn>
-        <div className="dpad-empty" />
+        {/* Row 2: Left | Center-Stop | Right */}
+        <button type="button" disabled={isDisabled} style={S.btn(heldKeys.left)} {...btnProps('left')} tabIndex={-1}>
+          ⬅
+          {!mobile && <span style={S.keyBadge}>{fmtKey(bindings.driveLeft)}/{fmtKey(bindings.driveLeftAlt)}</span>}
+        </button>
+        <div style={S.centerBtn(false)}>■</div>
+        <button type="button" disabled={isDisabled} style={S.btn(heldKeys.right)} {...btnProps('right')} tabIndex={-1}>
+          ➡
+          {!mobile && <span style={S.keyBadge}>{fmtKey(bindings.driveRight)}/{fmtKey(bindings.driveRightAlt)}</span>}
+        </button>
+
+        {/* Row 3: empty | Down | empty */}
+        <div />
+        <button type="button" disabled={isDisabled} style={S.btn(heldKeys.backward)} {...btnProps('backward')} tabIndex={-1}>
+          ⬇
+          {!mobile && <span style={S.keyBadge}>{fmtKey(bindings.driveBack)}/{fmtKey(bindings.driveBackAlt)}</span>}
+        </button>
+        <div />
       </div>
 
-      {/* ── E-STOP ── */}
+      {/* E-STOP */}
       <button
         type="button"
-        className={`drive-estop ${estop ? 'drive-estop-active' : ''}`}
-        onClick={handleEstop}
-        disabled={estop}
+        style={S.estopBtn(estop)}
+        onClick={estop ? liftEstop : handleEstop}
         aria-label="Emergency stop"
       >
-        🛑 E-STOP
+        ⛔ {estop ? 'LIFT E-STOP' : 'EMERGENCY STOP'}
       </button>
 
-      <p className="drive-hint">Hold button or use WASD / Arrow keys · multi-key supported</p>
+      {!mobile && (
+        <p style={{ fontSize: 10, color: '#475569', marginTop: 8, textAlign: 'center' }}>
+          Hold button or use {fmtKey(bindings.driveForwardAlt)}/{fmtKey(bindings.driveBackAlt)}/{fmtKey(bindings.driveLeftAlt)}/{fmtKey(bindings.driveRightAlt)} · multi-key supported
+        </p>
+      )}
     </div>
-  );
-}
-
-function DPadBtn({ active, disabled, children, label, ...rest }) {
-  return (
-    <button
-      type="button"
-      className={`dpad-btn ${active ? 'dpad-btn-active' : ''}`}
-      disabled={disabled}
-      aria-pressed={active}
-      aria-label={label}
-      tabIndex={-1}
-      style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
-      {...rest}
-    >
-      {children}
-    </button>
   );
 }

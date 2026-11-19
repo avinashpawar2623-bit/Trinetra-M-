@@ -1,151 +1,308 @@
 /**
- * ArmControl — Robotic arm joint control panel.
+ * ArmControl — Redesigned game-controller-style arm panel.
  *
- * Direction convention (confirmed):
- *   Open  → positive (+1)  e.g. claw: +1, clawJ: +1
- *   Close → negative (-1)  e.g. claw: -1, clawJ: -1
+ * Base servo: 360° CONTINUOUS ROTATION servo.
+ *   angle 90 = STOP.  < 90 = CCW.  > 90 = CW.
+ *   CW button held  → send base_angle = 100 (90+10), release → 90
+ *   CCW button held → send base_angle = 80  (90-10), release → 90
+ *   NO base speed slider — fixed 10° offset.
  *
- * Each joint row has two hold-buttons. While HELD → POST /arm_control every 80 ms.
- * On RELEASE → send all-zero stop command.
+ * All other joints: POSITIONAL servos.
+ *   Track angle client-side (init 90°), clamp 0–180.
+ *   Each tick (100ms): angle ± 5°
+ *   On release: send current angle (hold position).
  *
- * Base servo: 360° continuous rotation servo.
- *   Neutral (stop) = angle 90°. Left < 90, Right > 90.
- *   A "Base Speed" mini-slider (1–5) controls the offset from 90°:
- *     speed 1 → ±3°, 2 → ±6°, 3 → ±10°, 4 → ±15°, 5 → ±22°
- *   On release, angle=90 is sent to stop the base.
- *
- * Visual feedback: a ref-based flash on each button on command send (no re-render).
- *
- * Keyboard shortcuts (when not in a form field):
- *   Q/E  → Base ←/→
+ * Keyboard shortcuts (from useKeybindings, remappable in SettingsPanel):
+ *   Q/E  → Base CCW/CW
  *   R/F  → Shoulder Up/Down
- *   T/G  → Elbow/Wrist Up/Down (mapped to wrist here)
- *   Y/H  → Wrist Up/Down (mapped to clawJ)
+ *   T/G  → Elbow Up/Down
+ *   Y/H  → Wrist Up/Down
  *   U/J  → Gripper Open/Close
+ *   P    → Pump toggle
  *
- * Props:
- *   disabled  – boolean, true when Pi is offline
- *   armSpeed  – number (1–10), controlled externally
+ * Visual flash on each button when command fires (ref-based, no re-render).
+ * Key badges hidden on mobile (<768px).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { sendArmCommand } from '../../hooks/usePiApi';
+import { useKeybindings } from '../../hooks/useKeybindings';
 
-const SEND_INTERVAL_MS = 80;
+const SEND_INTERVAL_MS = 100;
+const STEP = 5;             // positional servo: degrees per tick
+const BASE_CW_ANGLE  = 100; // 90 + 10 → slow CW
+const BASE_CCW_ANGLE = 80;  // 90 - 10 → slow CCW
+const BASE_STOP      = 90;  // neutral stop
 
-// Base speed slider: maps 1–5 → degree offset from 90°
-const BASE_SPEED_OFFSETS = [0, 3, 6, 10, 15, 22]; // index = speed 0–5
+const isMobile = () => window.innerWidth < 768;
 
-function stopCmd(armSpeed) {
-  return { base: 0, arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0, speed: armSpeed, reset: false };
-}
-
-function buildArmCmd(field, dir, armSpeed) {
-  const axes = { base: 0, arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0 };
-  axes[field] = dir;
-  return { ...axes, speed: armSpeed, reset: false };
-}
-
-/** True when the event came from a text input — skip arm hotkeys. */
 function isFormField(el) {
   if (!el) return false;
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
-/**
- * Joint rows.
- * negDir = value sent for the LEFT button (-1 or +1 depending on physical direction)
- * posDir = value sent for the RIGHT button
- *
- * Open claw/jaw → +1   (hardware: motor spins outward)
- * Close claw/jaw → -1  (hardware: motor spins inward)
- */
+// ─── Styles ──────────────────────────────────────────────────────────────────
+const COLOR_MAP = {
+  blue:   { border: '#3b82f6', glow: '#3b82f6', label: '#60a5fa' },
+  green:  { border: '#22c55e', glow: '#22c55e', label: '#4ade80' },
+  purple: { border: '#a855f7', glow: '#a855f7', label: '#c084fc' },
+  orange: { border: '#f97316', glow: '#f97316', label: '#fb923c' },
+  yellow: { border: '#eab308', glow: '#eab308', label: '#facc15' },
+  cyan:   { border: '#06b6d4', glow: '#06b6d4', label: '#22d3ee' },
+  red:    { border: '#ef4444', glow: '#ef4444', label: '#f87171' },
+};
+
+const S = {
+  panel: {
+    background: '#1a1a2e',
+    border: '1px solid #16213e',
+    borderRadius: 16,
+    padding: '16px 14px 14px',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    touchAction: 'none',
+    overscrollBehavior: 'contain',
+  },
+  header: {
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: '0.12em',
+    color: '#e94560',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  grid: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  rowLabel: (color) => ({
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    color: COLOR_MAP[color]?.label ?? '#94a3b8',
+    minWidth: 52,
+    textAlign: 'right',
+    flexShrink: 0,
+  }),
+  btnPair: {
+    display: 'flex',
+    gap: 6,
+    flex: 1,
+  },
+  btn: (held, color) => {
+    const c = COLOR_MAP[color] ?? COLOR_MAP.blue;
+    return {
+      flex: 1,
+      minHeight: isMobile() ? 56 : 52,
+      borderRadius: 12,
+      border: `2px solid ${held ? c.glow : c.border}`,
+      background: held
+        ? `linear-gradient(145deg, ${c.border}66, ${c.border}33)`
+        : 'linear-gradient(145deg, #16213e, #0f172a)',
+      color: held ? '#fff' : '#94a3b8',
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: 'pointer',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 2,
+      boxShadow: held
+        ? `0 0 12px ${c.glow}88, 0 2px 6px rgba(0,0,0,0.5)`
+        : '0 2px 6px rgba(0,0,0,0.3)',
+      transition: 'box-shadow 80ms, border-color 80ms, background 80ms',
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+      touchAction: 'none',
+      padding: '4px 2px',
+    };
+  },
+  keyBadge: {
+    fontSize: 9,
+    color: '#888',
+    background: '#111',
+    borderRadius: 3,
+    padding: '1px 3px',
+    fontFamily: 'monospace',
+    marginTop: 1,
+  },
+  pumpBtn: (on) => ({
+    width: '100%',
+    padding: '10px 0',
+    marginTop: 8,
+    borderRadius: 12,
+    border: `2px solid ${on ? '#06b6d4' : '#0f3460'}`,
+    background: on
+      ? 'linear-gradient(145deg, #164e63, #0c4a6e)'
+      : 'linear-gradient(145deg, #16213e, #0f172a)',
+    color: on ? '#67e8f9' : '#64748b',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+    letterSpacing: '0.08em',
+    boxShadow: on ? '0 0 14px #06b6d488' : 'none',
+    transition: 'box-shadow 80ms, border-color 80ms',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+  }),
+  resetBtn: {
+    width: '100%',
+    padding: '8px 0',
+    marginTop: 6,
+    borderRadius: 10,
+    border: '1px solid #334155',
+    background: 'linear-gradient(145deg, #1e293b, #0f172a)',
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+  },
+  statusRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+    fontSize: 11,
+    color: '#64748b',
+    fontFamily: 'monospace',
+  },
+  statusDot: (color) => ({
+    width: 7,
+    height: 7,
+    borderRadius: '50%',
+    background: color,
+    flexShrink: 0,
+  }),
+};
+
+// ─── Joint definitions ────────────────────────────────────────────────────────
 const JOINTS = [
   {
-    id: 'base', label: 'Base', field: 'base',
-    color: 'blue',
-    negLabel: '🔄 Base ←', negDir: -1, negKey: 'q',
-    posLabel: '🔄 Base →', posDir: 1,  posKey: 'e',
+    id: 'base', label: 'Base', color: 'blue',
+    negLabel: '↺ CCW', posLabel: 'CW ↻',
+    bindNeg: 'baseCCW', bindPos: 'baseCW',
     isBase: true,
   },
   {
-    id: 'arm', label: 'Shoulder', field: 'arm',
-    color: 'green',
-    negLabel: '⬆️ Shoulder Up',   negDir: 1,  negKey: 'r',
-    posLabel: '⬇️ Shoulder Down', posDir: -1, posKey: 'f',
+    id: 'shoulder', label: 'Shoulder', color: 'green',
+    negLabel: '↓ Down', posLabel: '↑ Up',
+    bindNeg: 'shoulderDown', bindPos: 'shoulderUp',
+    field: 'arm', negDelta: -STEP, posDelta: +STEP,
   },
   {
-    id: 'wrist', label: 'Wrist', field: 'wrist',
-    color: 'purple',
-    negLabel: '↩️ Wrist Left',  negDir: 1,  negKey: 't',
-    posLabel: '↪️ Wrist Right', posDir: -1, posKey: 'g',
+    id: 'elbow', label: 'Elbow', color: 'purple',
+    negLabel: '↓ Down', posLabel: '↑ Up',
+    bindNeg: 'elbowDown', bindPos: 'elbowUp',
+    field: 'wrist', negDelta: -STEP, posDelta: +STEP,
   },
   {
-    id: 'clawJ', label: 'Claw Jaw', field: 'clawJ',
-    color: 'orange',
-    negLabel: '👐 Jaw Open',  negDir: 1,  negKey: 'y',
-    posLabel: '🤏 Jaw Close', posDir: -1, posKey: 'h',
+    id: 'wrist', label: 'Wrist', color: 'orange',
+    negLabel: '↓ Down', posLabel: '↑ Up',
+    bindNeg: 'wristDown', bindPos: 'wristUp',
+    field: 'clawJ', negDelta: -STEP, posDelta: +STEP,
   },
   {
-    id: 'claw', label: 'Claw', field: 'claw',
-    color: 'yellow',
-    negLabel: '🖐️ Claw Open',  negDir: 1,  negKey: 'u',
-    posLabel: '✊ Claw Close', posDir: -1, posKey: 'j',
-  },
-  {
-    id: 'rot', label: '360° Rot', field: 'rot',
-    color: 'cyan',
-    negLabel: '🔁 CCW', negDir: -1, negKey: null,
-    posLabel: '🔁 CW',  posDir: 1,  posKey: null,
+    id: 'gripper', label: 'Gripper', color: 'yellow',
+    negLabel: '● Close', posLabel: '○ Open',
+    bindNeg: 'gripperClose', bindPos: 'gripperOpen',
+    field: 'claw', negDelta: -STEP, posDelta: +STEP,
   },
 ];
 
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
 export default function ArmControl({ disabled = false, armSpeed = 5 }) {
+  const { bindings } = useKeybindings();
   const [heldKey, setHeldKey] = useState(null);
-  const [baseSpeed, setBaseSpeed] = useState(2); // 1–5
+  const [pumpOn, setPumpOn] = useState(false);
+  const mobile = isMobile();
 
-  const intervalRef   = useRef(null);
-  const heldRef       = useRef(null);
-  const armSpeedRef   = useRef(armSpeed);
-  const disabledRef   = useRef(disabled);
-  const baseSpeedRef  = useRef(baseSpeed);
+  // Positional servo angles tracked client-side (init 90°)
+  const angles = useRef({ arm: 90, wrist: 90, clawJ: 90, claw: 90 });
 
-  // Flash refs: { [btnId]: HTMLElement }
-  const btnElRefs = useRef({});
+  const intervalRef  = useRef(null);
+  const heldRef      = useRef(null);
+  const armSpeedRef  = useRef(armSpeed);
+  const disabledRef  = useRef(disabled);
+  const bindingsRef  = useRef(bindings);
+  const btnElRefs    = useRef({});
 
-  heldRef.current      = heldKey;
-  armSpeedRef.current  = armSpeed;
-  disabledRef.current  = disabled;
-  baseSpeedRef.current = baseSpeed;
+  heldRef.current     = heldKey;
+  armSpeedRef.current = armSpeed;
+  disabledRef.current = disabled;
+  bindingsRef.current = bindings;
 
-  /** Flash a button element green for 120ms (no setState). */
+  /** Flash a button green for 120ms (no setState). */
   function flashBtn(id) {
     const el = btnElRefs.current[id];
     if (!el) return;
     el.style.boxShadow = '0 0 0 2px #22c55e';
     el.style.borderColor = '#22c55e';
     setTimeout(() => {
-      if (el) {
-        el.style.boxShadow = '';
-        el.style.borderColor = '';
-      }
+      if (el) { el.style.boxShadow = ''; el.style.borderColor = ''; }
     }, 120);
   }
 
-  /** Build arm command. For base, use angle offset instead of -1/0/1. */
-  function buildCmd(field, dir, flashId) {
+  /** Build and send one arm command. */
+  function sendCmd(joint, delta, flashId) {
     if (flashId) flashBtn(flashId);
-    return buildArmCmd(field, dir, armSpeedRef.current);
+
+    if (joint.isBase) {
+      // Base: continuous rotation — use fixed angle
+      const angle = delta > 0 ? BASE_CW_ANGLE : BASE_CCW_ANGLE;
+      const cmd = { base_angle: angle, arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0, speed: armSpeedRef.current, reset: false };
+      console.log('[ArmControl] base cmd', cmd);
+      sendArmCommand(cmd);
+    } else {
+      // Positional: track angle client-side
+      const field = joint.field;
+      angles.current[field] = clamp(angles.current[field] + delta, 0, 180);
+      const cmd = {
+        base_angle: BASE_STOP, // keep base stopped
+        arm:   field === 'arm'   ? angles.current.arm   : 0,
+        wrist: field === 'wrist' ? angles.current.wrist : 0,
+        clawJ: field === 'clawJ' ? angles.current.clawJ : 0,
+        claw:  field === 'claw'  ? angles.current.claw  : 0,
+        rot: 0,
+        speed: armSpeedRef.current,
+        reset: false,
+      };
+      console.log('[ArmControl] positional cmd', joint.id, field, angles.current[field], cmd);
+      sendArmCommand(cmd);
+    }
   }
 
-  const startHold = useCallback((field, dir, key, flashId) => {
+  /** Stop: send base neutral, keep positional at current angles. */
+  function sendStop() {
+    const cmd = {
+      base_angle: BASE_STOP,
+      arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0,
+      speed: armSpeedRef.current, reset: false,
+    };
+    sendArmCommand(cmd);
+  }
+
+  const startHold = useCallback((joint, delta, key, flashId) => {
     if (disabledRef.current) return;
     setHeldKey(key);
-    sendArmCommand(buildCmd(field, dir, flashId));
+    sendCmd(joint, delta, flashId);
     clearInterval(intervalRef.current);
     intervalRef.current = setInterval(() => {
       if (heldRef.current === key) {
-        sendArmCommand(buildCmd(field, dir, null));
+        sendCmd(joint, delta, null);
       }
     }, SEND_INTERVAL_MS);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -154,41 +311,50 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
     clearInterval(intervalRef.current);
     intervalRef.current = null;
     setHeldKey(null);
-    sendArmCommand(stopCmd(armSpeedRef.current));
-  }, []);
+    sendStop();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => clearInterval(intervalRef.current), []);
 
   function handleReset() {
     clearInterval(intervalRef.current);
     setHeldKey(null);
-    sendArmCommand({ base: 0, arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0, speed: armSpeedRef.current, reset: true });
+    angles.current = { arm: 90, wrist: 90, clawJ: 90, claw: 90 };
+    sendArmCommand({ base_angle: BASE_STOP, arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0, speed: armSpeedRef.current, reset: true });
   }
 
-  // ── Keyboard shortcuts ────────────────────────────────────────────────────────
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
-    // Build a lookup: key → { field, dir, negKey or posKey }
-    const keyMap = {};
-    for (const j of JOINTS) {
-      if (j.negKey) keyMap[j.negKey] = { field: j.field, dir: j.negDir, btnId: `${j.field}-neg` };
-      if (j.posKey) keyMap[j.posKey] = { field: j.field, dir: j.posDir, btnId: `${j.field}-pos` };
-    }
-
     const heldKbKeys = new Set();
+
+    function findAction(code) {
+      const b = bindingsRef.current;
+      for (const j of JOINTS) {
+        if (code === b[j.bindNeg]) return { joint: j, delta: j.isBase ? -1 : j.negDelta, btnId: `${j.id}-neg` };
+        if (code === b[j.bindPos]) return { joint: j, delta: j.isBase ?  1 : j.posDelta, btnId: `${j.id}-pos` };
+      }
+      if (code === b.pumpToggle) return { pump: true };
+      return null;
+    }
 
     function onKeyDown(e) {
       if (isFormField(document.activeElement)) return;
-      const info = keyMap[e.key?.toLowerCase()];
-      if (!info || heldKbKeys.has(e.key)) return;
+      const info = findAction(e.code);
+      if (!info || heldKbKeys.has(e.code)) return;
       e.preventDefault();
-      heldKbKeys.add(e.key);
-      startHold(info.field, info.dir, `kb-${info.btnId}`, info.btnId);
+      heldKbKeys.add(e.code);
+      if (info.pump) {
+        setPumpOn(p => !p);
+        return;
+      }
+      startHold(info.joint, info.delta, `kb-${info.btnId}`, info.btnId);
     }
 
     function onKeyUp(e) {
-      if (!heldKbKeys.has(e.key)) return;
-      heldKbKeys.delete(e.key);
-      stopHold();
+      if (!heldKbKeys.has(e.code)) return;
+      heldKbKeys.delete(e.code);
+      const info = findAction(e.code);
+      if (info && !info.pump) stopHold();
     }
 
     window.addEventListener('keydown', onKeyDown);
@@ -199,126 +365,107 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
     };
   }, [startHold, stopHold]);
 
-  function holdProps(field, dir, key, flashId) {
+  function holdProps(joint, delta, key, flashId) {
     return {
-      onPointerDown: (e) => { e.currentTarget.setPointerCapture(e.pointerId); startHold(field, dir, key, flashId); },
+      onPointerDown: (e) => { e.currentTarget.setPointerCapture(e.pointerId); startHold(joint, delta, key, flashId); },
       onPointerUp: stopHold,
       onPointerCancel: stopHold,
       onPointerLeave: stopHold,
-      onTouchStart: (e) => { e.preventDefault(); startHold(field, dir, key, flashId); },
+      onTouchStart: (e) => { e.preventDefault(); startHold(joint, delta, key, flashId); },
       onTouchEnd: (e) => { e.preventDefault(); stopHold(); },
     };
   }
 
-  // Find which joint is being held to show its color
-  const activeJoint = heldKey ? JOINTS.find(j => heldKey.startsWith(j.field) || heldKey.startsWith('kb-' + j.field)) : null;
+  const fmtKey = (code) => {
+    if (!code) return '?';
+    const m = { ArrowUp:'↑', ArrowDown:'↓', ArrowLeft:'←', ArrowRight:'→', Space:'SPC' };
+    return m[code] || (code.startsWith('Key') ? code.slice(3) : code);
+  };
+
+  const dotColor = disabled ? '#6b7280' : heldKey ? '#22c55e' : '#3b82f6';
 
   return (
-    <div
-      className="arm-control"
-      aria-label="Rover arm controls"
-      style={{ touchAction: 'none', overscrollBehavior: 'contain', userSelect: 'none', WebkitUserSelect: 'none' }}
-    >
+    <div style={S.panel} aria-label="Rover arm controls">
 
-      {/* ── Status bar ── */}
-      <div className="arm-status-bar">
-        <span className={`drive-status-dot ${disabled ? 'drive-dot-offline' : heldKey ? 'drive-dot-ok' : 'drive-dot-ok'}`} />
-        <span className="arm-status-text">
-          {disabled
-            ? '⚠ Pi offline'
-            : heldKey
-              ? `Moving · ${activeJoint?.label ?? heldKey}`
-              : 'ARM READY'}
+      {/* Header */}
+      <div style={S.header}>🦾 ARM CONTROL</div>
+
+      {/* Status */}
+      <div style={S.statusRow}>
+        <div style={S.statusDot(dotColor)} />
+        <span>
+          {disabled ? '⚠ Pi offline' : heldKey ? `Moving · ${heldKey.replace('kb-', '')}` : 'ARM READY'}
         </span>
-        {heldKey && <span className={`arm-active-badge arm-color-${activeJoint?.color}`}>{activeJoint?.label}</span>}
       </div>
 
-      {/* ── Base Speed mini-slider ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12, color: '#94a3b8' }}>
-        <label htmlFor="base-speed-slider" style={{ whiteSpace: 'nowrap' }}>Base speed</label>
-        <input
-          id="base-speed-slider"
-          type="range"
-          min={1}
-          max={5}
-          value={baseSpeed}
-          onChange={(e) => setBaseSpeed(Number(e.target.value))}
-          tabIndex={-1}
-          style={{ flex: 1, accentColor: '#3b82f6' }}
-        />
-        <span style={{ minWidth: 16, textAlign: 'right' }}>{baseSpeed}</span>
-      </div>
+      {/* Joint rows */}
+      <div style={S.grid}>
+        {JOINTS.map((joint) => {
+          const negId = `${joint.id}-neg`;
+          const posId = `${joint.id}-pos`;
+          const negDelta = joint.isBase ? -1 : joint.negDelta;
+          const posDelta = joint.isBase ?  1 : joint.posDelta;
+          const negHeld = heldKey === negId || heldKey === `kb-${negId}`;
+          const posHeld = heldKey === posId || heldKey === `kb-${posId}`;
 
-      {/* ── Joint rows ── */}
-      <div className="arm-grid">
-        {JOINTS.map(({ id, label, field, color, negLabel, negDir, posLabel, posDir, negKey, posKey }) => {
-          const negId = `${field}-neg`;
-          const posId = `${field}-pos`;
           return (
-            <div key={id} className="arm-row">
-              <span className={`arm-joint-label arm-label-${color}`}>{label}</span>
-              <div className="arm-btn-pair">
-                <ArmBtn
-                  held={heldKey === negId || heldKey === `kb-${negId}`}
+            <div key={joint.id} style={S.row}>
+              <span style={S.rowLabel(joint.color)}>{joint.label}</span>
+              <div style={S.btnPair}>
+                {/* Neg button */}
+                <button
+                  type="button"
                   disabled={disabled}
-                  color={color}
-                  btnRef={(el) => { btnElRefs.current[negId] = el; }}
-                  {...holdProps(field, negDir, negId, negId)}
+                  style={S.btn(negHeld, joint.color)}
+                  ref={el => { btnElRefs.current[negId] = el; }}
+                  tabIndex={-1}
+                  aria-pressed={negHeld}
+                  {...holdProps(joint, negDelta, negId, negId)}
                 >
-                  {negLabel}
-                  {negKey && <span style={{ display: 'block', fontSize: 10, opacity: 0.5, marginTop: 2 }}>[{negKey.toUpperCase()}]</span>}
-                </ArmBtn>
-                <ArmBtn
-                  held={heldKey === posId || heldKey === `kb-${posId}`}
+                  {joint.negLabel}
+                  {!mobile && <span style={S.keyBadge}>{fmtKey(bindings[joint.bindNeg])}</span>}
+                </button>
+                {/* Pos button */}
+                <button
+                  type="button"
                   disabled={disabled}
-                  color={color}
-                  btnRef={(el) => { btnElRefs.current[posId] = el; }}
-                  {...holdProps(field, posDir, posId, posId)}
+                  style={S.btn(posHeld, joint.color)}
+                  ref={el => { btnElRefs.current[posId] = el; }}
+                  tabIndex={-1}
+                  aria-pressed={posHeld}
+                  {...holdProps(joint, posDelta, posId, posId)}
                 >
-                  {posLabel}
-                  {posKey && <span style={{ display: 'block', fontSize: 10, opacity: 0.5, marginTop: 2 }}>[{posKey.toUpperCase()}]</span>}
-                </ArmBtn>
+                  {joint.posLabel}
+                  {!mobile && <span style={S.keyBadge}>{fmtKey(bindings[joint.bindPos])}</span>}
+                </button>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* ── Reset All ── */}
+      {/* Pump toggle */}
       <button
         type="button"
-        className="arm-reset-btn"
-        onClick={handleReset}
+        style={S.pumpBtn(pumpOn)}
+        onClick={() => setPumpOn(p => !p)}
         disabled={disabled}
-        aria-label="Reset all arm joints to home position"
+        aria-pressed={pumpOn}
       >
-        🏠 Reset All Arm
+        💧 {pumpOn ? 'PUMP ON' : 'PUMP TOGGLE'}
+        {!mobile && <span style={{ ...S.keyBadge, marginLeft: 6 }}>{fmtKey(bindings.pumpToggle)}</span>}
       </button>
 
-      <p style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
-        Keyboard: Q/E Base · R/F Shoulder · T/G Wrist · Y/H Jaw · U/J Claw
-      </p>
-    </div>
-  );
-}
+      {/* Reset */}
+      <button type="button" style={S.resetBtn} onClick={handleReset} disabled={disabled}>
+        🏠 Reset All Joints (→ 90°)
+      </button>
 
-function ArmBtn({ held, disabled, color, children, btnRef, ...rest }) {
-  return (
-    <button
-      type="button"
-      className={`arm-btn arm-btn-${color} ${held ? `arm-btn-active arm-btn-active-${color}` : ''}`}
-      disabled={disabled}
-      aria-pressed={held}
-      tabIndex={-1}
-      ref={btnRef}
-      style={{
-        userSelect: 'none',
-        WebkitUserSelect: 'none',
-        transition: 'box-shadow 0.1s, border-color 0.1s',
-      }}
-      {...rest}
-    >
-      {children}
-    </button>
+      {!mobile && (
+        <p style={{ fontSize: 10, color: '#334155', marginTop: 6, textAlign: 'center' }}>
+          Q/E Base · R/F Shoulder · T/G Elbow · Y/H Wrist · U/J Gripper · P Pump
+        </p>
+      )}
+    </div>
   );
 }
