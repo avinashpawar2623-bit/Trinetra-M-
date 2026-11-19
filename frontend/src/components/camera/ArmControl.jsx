@@ -46,15 +46,13 @@ function sendArm(payload) {
   sendArmCommand(payload);
 }
 
-/** POST /setmode ONLINE to put rover in dashboard control mode. */
+/** POST /setmode ONLINE to put rover in dashboard control mode. Returns a promise. */
 function sendOnlineMode() {
-  fetch(`${PI_BASE_URL}/setmode`, {
+  return fetch(`${PI_BASE_URL}/setmode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode: 'ONLINE' }),
-  })
-    .then(() => console.log('[ARM] ONLINE mode set'))
-    .catch(e => console.warn('[ARM] setmode failed', e));
+  });
 }
 
 function isFormField(el) {
@@ -190,6 +188,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
   const { bindings } = useKeybindings();
   const [heldId, setHeldId] = useState(null);
   const [rotSpeed, setRotSpeed] = useState(2); // UI state for slider display
+  const [onlineOk, setOnlineOk] = useState(false); // green = ONLINE mode confirmed
 
   const intervalRef   = useRef(null);
   const heldPayRef    = useRef(null);
@@ -203,18 +202,27 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
   armSpeedRef.current = armSpeed;
   bindingsRef.current = bindings;
 
-  // ── Send SETMODE ONLINE on mount ──────────────────────────────────────────
+  // ── Send SETMODE ONLINE on mount + repeat every 2s while panel is visible ──
+  // The physical remote sends UDP every 50ms which resets remoteMode.
+  // Repeating every 2s overwrites it frequently enough for arm commands to land.
   useEffect(() => {
-    sendOnlineMode();
+    const doSend = () => {
+      sendOnlineMode()
+        .then(() => setOnlineOk(true))
+        .catch(() => setOnlineOk(false));
+    };
+    doSend(); // immediate on mount
+    const id = setInterval(doSend, 2000); // repeat every 2s
+    return () => clearInterval(id); // cleanup on unmount
   }, []);
 
-  // Cleanup interval on unmount
+  // ── Cleanup arm repeat interval on unmount ────────────────────────────────
   useEffect(() => () => clearInterval(intervalRef.current), []);
 
-  // ── Re-send ONLINE mode on first button press (safety) ───────────────────
+  // ── Re-send ONLINE mode on first button press (extra safety) ─────────────
   function ensureOnlineMode() {
     if (!modeSetRef.current) {
-      sendOnlineMode();
+      sendOnlineMode().catch(() => {});
       modeSetRef.current = true;
     }
   }
@@ -315,9 +323,22 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
       }}
       aria-label="Rover arm controls"
     >
-      {/* Header */}
-      <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.12em', color: C.textPri, marginBottom: 12, textTransform: 'uppercase' }}>
-        🦾 ARM CONTROL
+      {/* Pulse animation for online dot */}
+      <style>{`@keyframes armOnlinePulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:0.65}}`}</style>
+
+      {/* Header with ONLINE status dot */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <div
+          title={onlineOk ? 'Rover ONLINE mode active' : 'Waiting for ONLINE mode confirmation'}
+          style={{
+            width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+            background: onlineOk ? '#16a34a' : '#dc2626',
+            animation: onlineOk ? 'armOnlinePulse 2s ease-in-out infinite' : 'none',
+          }}
+        />
+        <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.12em', color: C.textPri, textTransform: 'uppercase' }}>
+          🦾 ARM CONTROL
+        </div>
       </div>
 
       {/* Status dot */}

@@ -26,7 +26,7 @@ const listeners = new Set();
 
 // ── Drive gate — direct to Pi, no auth header needed ─────────────────────────
 const driveGate = createCommandGate({
-  timeoutMs: 500,                       // generous: Pi RTT ~50–150ms
+  timeoutMs: 300,                       // 300ms: short enough to drop stale key-releases, Pi RTT ~50–150ms
   onUpdate: () => publish(),
   send: async (job, { signal }) => {
     const res = await fetch(`${PI_BASE_URL}${job.path}`, {
