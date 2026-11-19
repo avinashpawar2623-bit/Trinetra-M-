@@ -165,6 +165,7 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
                 <SnapshotStream
                   imgRef={snapshotImgRef}
                   snapshotUrl={PI_SNAPSHOT_URL}
+                  pauseMs={0}
                   onFrame={(ts) => {
                     setSnapFrameAt(ts);
                     // Rolling fps counter over 2-second windows
