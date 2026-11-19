@@ -39,7 +39,7 @@ export function createCommandGate({ timeoutMs = 350, send, onUpdate }) {
     const timer = setTimeout(() => controller.abort(), timeout);
     const started = Date.now();
     try {
-      const result = await send(job.body, { signal: controller.signal });
+      const result = await send(job, { signal: controller.signal });
       stats.lastRttMs = Date.now() - started;
       stats.upstreamRttMs = Number.isFinite(result?.upstreamRttMs) ? result.upstreamRttMs : null;
       stats.lastStatus = result?.status ?? 0;
@@ -62,9 +62,9 @@ export function createCommandGate({ timeoutMs = 350, send, onUpdate }) {
     }
   }
 
-  function submit(body, { priority = false } = {}) {
+  function submit(job, { priority = false } = {}) {
     if (inflight || pending) stats.coalesced += 1;
-    pending = { body };
+    pending = job;
     if (priority && currentAbort) currentAbort.abort();
     pump();
   }
