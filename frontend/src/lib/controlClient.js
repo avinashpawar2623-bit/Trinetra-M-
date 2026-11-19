@@ -1,9 +1,22 @@
 /**
- * Privileged motion commands go to this dashboard's backend, which checks
- * the Firebase ID token. The browser does not talk to the Pi control port
- * and does not send a role in the body.
+ * Motion commands (drive, arm) go DIRECTLY to the Pi over Tailscale —
+ * no Express proxy, no Firebase token, no cold-start latency.
+ *
+ * WHY DIRECT:
+ *   The original path was: Browser → Vercel /api/control → Pi
+ *   Vercel serverless has 200–500ms cold-start + 350ms gate timeout.
+ *   At 200ms repeat interval, most commands timed out before reaching the Pi.
+ *
+ *   The Pi is behind Tailscale ACLs — only authorised nodes can reach it.
+ *   Drive/arm endpoints on the Pi do NOT require a Firebase token.
+ *   Sending directly cuts RTT from ~500ms to ~50–100ms.
+ *
+ * SETMODE still goes through the backend proxy (needs admin auth check).
+ *
+ * commandGate is kept for drive commands so the interval loop never builds
+ * a queue — it coalesces while one is in-flight, same as before.
  */
-import { API_BASE_URL, resolveApiUrl } from '../config/constants';
+import { PI_BASE_URL, API_BASE_URL, resolveApiUrl } from '../config/constants';
 import { auth } from './firebase';
 import { canControlRover } from './rbac';
 import { createCommandGate } from './commandGate';
@@ -11,7 +24,38 @@ import { createCommandGate } from './commandGate';
 let role = 'viewer';
 const listeners = new Set();
 
-const gate = createCommandGate({
+// ── Drive gate — direct to Pi, no auth header needed ─────────────────────────
+const driveGate = createCommandGate({
+  timeoutMs: 500,                       // generous: Pi RTT ~50–150ms
+  onUpdate: () => publish(),
+  send: async (job, { signal }) => {
+    const res = await fetch(`${PI_BASE_URL}${job.path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(job.body),
+      signal,
+    });
+    return { ok: res.ok, status: res.status };
+  },
+});
+
+// ── Arm gate — direct to Pi ───────────────────────────────────────────────────
+const armGate = createCommandGate({
+  timeoutMs: 500,
+  onUpdate: () => publish(),
+  send: async (job, { signal }) => {
+    const res = await fetch(`${PI_BASE_URL}${job.path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(job.body),
+      signal,
+    });
+    return { ok: res.ok, status: res.status };
+  },
+});
+
+// ── Privileged gate — through Express backend (needs Firebase admin role) ─────
+const privilegedGate = createCommandGate({
   timeoutMs: 350,
   onUpdate: () => publish(),
   send: async (job, { signal }) => {
@@ -32,11 +76,7 @@ const gate = createCommandGate({
       signal,
     });
     let payload = null;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
+    try { payload = await response.json(); } catch { payload = null; }
     return {
       ok: response.ok,
       status: response.status,
@@ -56,7 +96,8 @@ export function setControlRole(next) {
 }
 
 export function getControlStats() {
-  return { ...gate.stats, role };
+  // Merge drive gate stats for the UI
+  return { ...driveGate.stats, role };
 }
 
 export function subscribeControlStats(fn) {
@@ -66,36 +107,34 @@ export function subscribeControlStats(fn) {
 }
 
 export function setCommandTimeoutMs(ms) {
-  gate.setTimeoutMs(ms);
+  driveGate.setTimeoutMs(ms);
+  armGate.setTimeoutMs(ms);
   publish();
 }
 
-function submit(path, body, { priority = false } = {}) {
+export function sendDriveCommand({ speed = 0, steer = 0, estop = false } = {}) {
   if (!canControlRover(role)) {
-    gate.stats.lastError = 'forbidden';
-    gate.stats.lastStatus = 403;
+    driveGate.stats.lastError = 'forbidden';
     publish();
     return;
   }
-  gate.submit({ path, body }, { priority });
+  driveGate.submit({ path: '/control', body: { speed, steer, estop } }, { priority: estop === true });
   publish();
 }
 
-export function sendDriveCommand({ speed = 0, steer = 0, estop = false, priority = false } = {}) {
-  const endpoint = resolveApiUrl('api/control', API_BASE_URL);
-  submit(endpoint, { speed, steer, estop }, { priority: priority || estop === true });
-}
-
 export function sendArmCommand(command) {
+  if (!canControlRover(role)) return;
   const stop = command?.base === 0 && command?.arm === 0 && command?.wrist === 0
     && command?.clawJ === 0 && command?.claw === 0 && command?.rot === 0;
-  const endpoint = resolveApiUrl('api/arm_control', API_BASE_URL);
-  submit(endpoint, command, { priority: stop || command?.reset === true });
+  armGate.submit({ path: '/arm_control', body: command }, { priority: stop || command?.reset === true });
+  publish();
 }
 
 export function sendModeCommand(mode) {
+  // SETMODE goes through the privileged backend (admin role required)
   const endpoint = resolveApiUrl('api/setmode', API_BASE_URL);
-  submit(endpoint, { mode }, { priority: true });
+  privilegedGate.submit({ path: endpoint, body: { mode } }, { priority: true });
+  publish();
 }
 
 export async function revokeServerSession() {

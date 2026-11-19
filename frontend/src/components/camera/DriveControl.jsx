@@ -129,9 +129,9 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
   // ── Button props helper ───────────────────────────────────────────────────────
   function btnProps(key) {
     return {
-      onMouseDown:  ()  => press(key),
-      onMouseUp:    ()  => release(key),
-      onMouseLeave: ()  => release(key),          // safety: cursor leaves button
+      onPointerDown:  (e) => { e.currentTarget.setPointerCapture(e.pointerId); press(key); },
+      onPointerUp:    ()  => release(key),
+      onPointerLeave: ()  => release(key),          // safety: cursor/finger leaves button
       onTouchStart: (e) => { e.preventDefault(); press(key); },
       onTouchEnd:   (e) => { e.preventDefault(); release(key); },
       onTouchCancel:(e) => { e.preventDefault(); release(key); },
