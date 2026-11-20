@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useRoverSensors } from '../../hooks/useRoverSensors';
 import { useRoverStatus } from '../../hooks/useRoverStatus';
 import { useDetections } from '../../hooks/useDetections';
@@ -8,9 +9,10 @@ import RoverControlPanel from '../camera/RoverControlPanel';
 
 /**
  * Camera and both controllers on one screen.
- * The camera stays put while the controls are used beside it (or directly under it on a phone).
+ * memo() — Cockpit's own props (onStreamStatus, controls) almost never change,
+ * so this prevents parent Dashboard re-renders from cascading into the camera tree.
  */
-export default function Cockpit({ onStreamStatus, controls = true }) {
+export default memo(function Cockpit({ onStreamStatus, controls = true }) {
   const sensors = useRoverSensors();
   const status = useRoverStatus();
   const detections = useDetections();
@@ -32,4 +34,4 @@ export default function Cockpit({ onStreamStatus, controls = true }) {
       {controls && <RoverControlPanel />}
     </div>
   );
-}
+});

@@ -1,6 +1,7 @@
 import { memo, useState, useRef, useCallback, useMemo } from 'react';
 import { OVERLAY_MIN_CONFIDENCE } from '../../config/constants';
 import { usePiApi } from '../../hooks/usePiApi';
+import { useNow } from '../../hooks/useNow';
 import { useFullscreen } from '../../hooks/useFullscreen';
 import { isDetectionFresh } from '../../lib/detections';
 import CameraStream, { STREAM_URL } from './CameraStream';
@@ -25,19 +26,11 @@ const FpsDisplay = memo(function FpsDisplay() {
   );
 });
 
-// ── CameraPanel ───────────────────────────────────────────────────────────────
-// Does NOT call usePiApi() — never re-renders from sensor WebSocket updates.
-// Receives detections + now from Dashboard (passed once per detection cycle,
-// not every 200ms sensor tick).
-export default memo(function CameraPanel({ detections, now, onStreamStatus }) {
-  const containerRef = useRef(null);
-  const { isFullscreen, toggle: toggleFullscreen, supported: fullscreenSupported } = useFullscreen(containerRef);
-
-  const [showOverlay, setShowOverlay] = useState(true);
-  const [offline,     setOffline]     = useState(false);
-  const [reconnects,  setReconnects]  = useState(0);
-
-  // Detection overlay — computed from props, not from usePiApi
+// ── DetectionSection — isolated now subscriber ────────────────────────────────
+// useNow() ticks every 1s. By isolating it here, CameraPanel (and therefore
+// CameraStream) never re-renders due to the now clock.
+const DetectionSection = memo(function DetectionSection({ detections, showOverlay }) {
+  const now = useNow();
   const payload        = detections?.data;
   const fresh          = isDetectionFresh(payload, now);
   const visibleObjects = useMemo(
@@ -47,8 +40,55 @@ export default memo(function CameraPanel({ detections, now, onStreamStatus }) {
     [fresh, payload],
   );
 
+  return (
+    <>
+      {showOverlay && (
+        <DetectionOverlay
+          objects={visibleObjects}
+          frameWidth={payload?.frameWidth}
+          frameHeight={payload?.frameHeight}
+        />
+      )}
+      {/* DetectionSummary renders below the camera frame — keep it here so it
+          also updates on its own without touching CameraStream */}
+    </>
+  );
+});
+
+// ── DetectionSummarySection — same isolation for the summary row ──────────────
+const DetectionSummarySection = memo(function DetectionSummarySection({ detections }) {
+  const now = useNow();
+  const payload        = detections?.data;
+  const fresh          = isDetectionFresh(payload, now);
+  const visibleObjects = useMemo(
+    () => (fresh && payload
+      ? payload.objects.filter((o) => o.confidence >= OVERLAY_MIN_CONFIDENCE)
+      : EMPTY),
+    [fresh, payload],
+  );
+  return (
+    <DetectionSummary
+      objects={visibleObjects}
+      fresh={fresh}
+      hasPayload={Boolean(payload)}
+      error={detections?.error}
+    />
+  );
+});
+
+// ── CameraPanel ───────────────────────────────────────────────────────────────
+// Does NOT call usePiApi() or useNow() — never re-renders from sensor WebSocket
+// updates or the 1s clock. Only re-renders when detections ref or stream status
+// actually changes.
+export default memo(function CameraPanel({ detections, onStreamStatus }) {
+  const containerRef = useRef(null);
+  const { isFullscreen, toggle: toggleFullscreen, supported: fullscreenSupported } = useFullscreen(containerRef);
+
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [offline,     setOffline]     = useState(false);
+  const [reconnects,  setReconnects]  = useState(0);
+
   // Stable callbacks — useCallback so memo() on CameraStream keeps working
-  // (not that CameraStream uses these — just keeping parent stable)
   const handleOffline = useCallback(() => {
     setOffline(true);
     setReconnects((c) => c + 1);
@@ -63,12 +103,10 @@ export default memo(function CameraPanel({ detections, now, onStreamStatus }) {
     : reconnects > 0 ? `live · ${reconnects} reconnects` : 'live';
 
   // Notify parent of stream status (Dashboard shows it in SystemHealth)
-  // useCallback-stable so parent memo is not broken
   const stableStatus = useMemo(
     () => ({ label: streamLabel, reconnects, freshness: 'unknown' }),
     [streamLabel, reconnects],
   );
-  // Fire parent callback only when stableStatus changes (not every render)
   const prevLabelRef = useRef('');
   if (prevLabelRef.current !== streamLabel) {
     prevLabelRef.current = streamLabel;
@@ -158,23 +196,14 @@ export default memo(function CameraPanel({ detections, now, onStreamStatus }) {
             */}
             <CameraStream url={STREAM_URL} />
 
-            {showOverlay && (
-              <DetectionOverlay
-                objects={visibleObjects}
-                frameWidth={payload?.frameWidth}
-                frameHeight={payload?.frameHeight}
-              />
-            )}
+            {/* DetectionSection: isolated useNow() — CameraStream unaffected */}
+            <DetectionSection detections={detections} showOverlay={showOverlay} />
           </>
         )}
       </div>
 
-      <DetectionSummary
-        objects={visibleObjects}
-        fresh={fresh}
-        hasPayload={Boolean(payload)}
-        error={detections?.error}
-      />
+      {/* DetectionSummary: also isolated (useNow inside) */}
+      <DetectionSummarySection detections={detections} />
     </div>
   );
 });

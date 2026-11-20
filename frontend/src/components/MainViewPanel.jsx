@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, memo, useState } from 'react';
 import { isDetectionFresh } from '../lib/detections';
 import CameraPanel from './camera/CameraPanel';
 import Card from './layout/Card';
@@ -28,7 +28,7 @@ function readSavedTab() {
  * connection (freeing the ESP32-CAM's single stream slot), and leaving the
  * 3D tab releases the WebGL context.
  */
-export default function MainViewPanel({ sensors, online, lastSeen, detections, now, onStreamStatus }) {
+export default memo(function MainViewPanel({ sensors, online, lastSeen, detections, now, onStreamStatus }) {
   const [tab, setTab] = useState(readSavedTab);
 
   function selectTab(id) {
@@ -62,7 +62,7 @@ export default function MainViewPanel({ sensors, online, lastSeen, detections, n
       </div>
 
       {tab === 'camera' ? (
-        <CameraPanel detections={detections} now={now} onStreamStatus={onStreamStatus} />
+        <CameraPanel detections={detections} onStreamStatus={onStreamStatus} />
       ) : (
         <Suspense fallback={<LoadingState label="Loading 3D view…" />}>
           <Rover3DView
@@ -77,4 +77,4 @@ export default function MainViewPanel({ sensors, online, lastSeen, detections, n
       )}
     </Card>
   );
-}
+});
