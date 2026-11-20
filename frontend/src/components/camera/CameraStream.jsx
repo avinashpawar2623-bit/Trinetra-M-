@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react';
+import { memo } from 'react';
 import { PI_STREAM_URL } from '../../config/constants';
 
 /**
@@ -25,9 +25,17 @@ const CameraStream = memo(function CameraStream({ url, retryKey, onError, onLoad
     <img
       key={`${url}-${retryKey}`}
       src={src}
-      alt="Live rover camera stream"
-      className="absolute inset-0 h-full w-full"
-      style={{ objectFit: 'fill', imageRendering: 'crisp-edges', WebkitImageRendering: 'crisp-edges', display: 'block' }}
+      alt="TRINETRA Camera"
+      style={{
+        width: '100%',
+        height: '100%',
+        objectFit: 'contain',
+        objectPosition: 'center',
+        display: 'block',
+        imageRendering: 'crisp-edges',
+        WebkitImageRendering: 'crisp-edges',
+        backgroundColor: '#000',
+      }}
       onError={onError}
       onLoad={onLoad}
       draggable={false}

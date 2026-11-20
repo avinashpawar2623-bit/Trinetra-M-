@@ -128,9 +128,38 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
       {/* ── Camera frame ── */}
       <div
         ref={containerRef}
-        className={`relative w-full overflow-hidden bg-black ${isFullscreen ? 'h-full' : 'rounded-lg'}`}
-        style={isFullscreen ? undefined : { aspectRatio: CAMERA_ASPECT_RATIO, maxWidth: '100%' }}
+        style={isFullscreen ? { width: '100%', height: '100%', background: '#000', position: 'relative' } : {
+          width: '100%',
+          aspectRatio: CAMERA_ASPECT_RATIO,
+          backgroundColor: '#000',
+          borderRadius: 10,
+          overflow: 'hidden',
+          position: 'relative',
+          boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 4px 24px rgba(0,0,0,0.6)',
+        }}
       >
+        {/* Keyframes for LIVE dot pulse */}
+        <style>{`@keyframes livePulse{0%,100%{opacity:1}50%{opacity:0.25}}`}</style>
+
+        {/* LIVE badge — top-left overlay */}
+        {!offline && (
+          <div style={{
+            position: 'absolute', top: 8, left: 8, zIndex: 10,
+            background: 'rgba(0,0,0,0.65)', color: '#fff',
+            padding: '3px 9px', borderRadius: 5, fontSize: 11,
+            fontWeight: 700, letterSpacing: '0.08em',
+            display: 'flex', alignItems: 'center', gap: 5,
+            backdropFilter: 'blur(4px)',
+            pointerEvents: 'none',
+          }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: '#e74c3c', display: 'inline-block',
+              animation: 'livePulse 1.2s ease-in-out infinite',
+            }} />
+            LIVE
+          </div>
+        )}
         {camera.loading ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <LoadingState label="Resolving camera URL…" />
