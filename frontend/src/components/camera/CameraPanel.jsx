@@ -5,7 +5,6 @@ import { useFullscreen } from '../../hooks/useFullscreen';
 import { usePiApi } from '../../hooks/usePiApi';
 import { isDetectionFresh } from '../../lib/detections';
 import CameraStream from './CameraStream';
-import SnapshotStream from './SnapshotStream';
 import DetectionOverlay from './DetectionOverlay';
 import DetectionSummary from './DetectionSummary';
 import CameraOffline from './CameraOffline';
@@ -93,7 +92,7 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
 
   const streamLabel = offline
     ? `offline · retry ${reconnects}`
-    : `${useSnapshot ? 'snapshot' : 'mjpeg'}${reconnects > 0 ? ` · ${reconnects} reconnects` : ''}`;
+    : reconnects > 0 ? `live · ${reconnects} reconnects` : 'live';
 
   useEffect(() => {
     onStreamStatus?.({ label: streamLabel, reconnects, freshness: 'unknown' });
