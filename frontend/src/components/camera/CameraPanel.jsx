@@ -48,17 +48,10 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
   const [retryKey,    setRetryKey]    = useState(0);
   const [failedKey,   setFailedKey]   = useState(null);
   const [reconnects,  setReconnects]  = useState(0);
-  const [transport,   setTransport]   = useState('snapshot');
-  const frameRef = useRef(null);
-  const snapshotUrl = toSnapshotUrl(camera.streamUrl);
-  const useSnapshot = transport === 'snapshot' && Boolean(snapshotUrl);
+  // Always use native MJPEG <img> — snapshot polling causes JS-driven lag
 
   const attemptKey = `${camera.streamUrl}|${retryKey}`;
   const offline    = failedKey === attemptKey;
-
-  useEffect(() => {
-    setTransport(snapshotUrl ? 'snapshot' : 'mjpeg');
-  }, [snapshotUrl]);
 
   // Auto-retry after offline with exponential back-off (1s → 2s → 4s … 15s)
   useEffect(() => {
@@ -83,15 +76,10 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
     setFailedKey(null);
   }, []);
 
-  const handleSnapFail = useCallback(() => {
-    setTransport('mjpeg');
-  }, []);
-
   const handleRetry = useCallback(() => {
     setRetryKey((k) => k + 1);
     setFailedKey(null);
-    setTransport(snapshotUrl ? 'snapshot' : 'mjpeg');
-  }, [snapshotUrl]);
+  }, []);
 
   // Detection overlay — isolated from sensor WebSocket
   const payload        = detections.data;
@@ -189,38 +177,12 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
               uninterrupted for the full session.
               handleError / handleLoad are useCallback — stable refs = memo works.
             */}
-            {useSnapshot ? (
-              <>
-                <img
-                  ref={frameRef}
-                  alt="TRINETRA Camera"
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
-                    objectPosition: 'center',
-                    display: 'block',
-                    background: '#000',
-                  }}
-                  draggable={false}
-                />
-                <SnapshotStream
-                  imgRef={frameRef}
-                  snapshotUrl={snapshotUrl}
-                  retryKey={retryKey}
-                  pauseMs={70}
-                  onFrame={handleLoad}
-                  onError={handleSnapFail}
-                />
-              </>
-            ) : (
-              <CameraStream
-                url={camera.streamUrl}
-                retryKey={retryKey}
-                onError={handleError}
-                onLoad={handleLoad}
-              />
-            )}
+            <CameraStream
+              url={camera.streamUrl}
+              retryKey={retryKey}
+              onError={handleError}
+              onLoad={handleLoad}
+            />
 
             {showOverlay && (
               <DetectionOverlay
