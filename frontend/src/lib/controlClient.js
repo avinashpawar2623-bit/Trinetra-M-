@@ -44,6 +44,8 @@ const armGate = createCommandGate({
   timeoutMs: 500,
   onUpdate: () => publish(),
   send: async (job, { signal }) => {
+    // Trace log — verify path and body before every arm fetch
+    console.log('[GATE] arm fetch to:', PI_BASE_URL + job.path, 'body:', JSON.stringify(job.body));
     const res = await fetch(`${PI_BASE_URL}${job.path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
