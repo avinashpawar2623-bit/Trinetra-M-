@@ -17,6 +17,7 @@ let idleHandoffSent = false;
 let lastOnlineAt = 0;
 let users = 0;
 let timer = null;
+let lockPromise = Promise.resolve();
 const listeners = new Set();
 
 function emit(online) {
@@ -38,16 +39,21 @@ export function postRoverMode(mode) {
 
 function sendOnline(force) {
   const now = Date.now();
-  if (!force && now - lastOnlineAt < 1800) return Promise.resolve();
-  lastOnlineAt = now;
-  return postRoverMode('ONLINE')
+  if (!force && now - lastOnlineAt < 1800) return lockPromise;
+  // Stamp success only after the Pi accepts ONLINE. A failed lock used to
+  // block retries for 1.8s, so arm commands kept arriving while the rover
+  // was still on the handset and the second shoulder never moved.
+  lockPromise = postRoverMode('ONLINE')
     .then((res) => {
-      emit(res.ok);
+      const ok = Boolean(res?.ok);
+      if (ok) lastOnlineAt = Date.now();
+      emit(ok);
       return res;
     })
     .catch(() => {
       emit(false);
     });
+  return lockPromise;
 }
 
 /** Explicit lock from the operate panel, before a stick is held. */
@@ -65,7 +71,8 @@ export function noteControlActivity() {
   lastActivity = Date.now();
   released = false;
   idleHandoffSent = false;
-  if (needLock) sendOnline(true);
+  if (needLock) return sendOnline(true);
+  return lockPromise;
 }
 
 /** Give the physical remote control immediately. */

@@ -20,13 +20,14 @@ import { PI_BASE_URL, API_BASE_URL, resolveApiUrl } from '../config/constants';
 import { auth } from './firebase';
 import { canControlRover } from './rbac';
 import { createCommandGate } from './commandGate';
+import { noteControlActivity } from './dashboardMode';
 
 let role = 'viewer';
 const listeners = new Set();
 
 // ── Drive gate — direct to Pi, no auth header needed ─────────────────────────
 const driveGate = createCommandGate({
-  timeoutMs: 800,                       // Tailscale RTT often exceeds 300ms; aborting early drops the move
+  timeoutMs: 1500,                      // Tailscale RTT often exceeds 300ms; aborting early drops the move
   onUpdate: () => publish(),
   send: async (job, { signal }) => {
     const res = await fetch(`${PI_BASE_URL}${job.path}`, {
@@ -34,6 +35,7 @@ const driveGate = createCommandGate({
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(job.body),
       signal,
+      priority: 'high',
     });
     return { ok: res.ok, status: res.status };
   },
@@ -41,7 +43,7 @@ const driveGate = createCommandGate({
 
 // ── Arm gate — direct to Pi ───────────────────────────────────────────────────
 const armGate = createCommandGate({
-  timeoutMs: 500,
+  timeoutMs: 1500,
   onUpdate: () => publish(),
   send: async (job, { signal }) => {
     const res = await fetch(`${PI_BASE_URL}${job.path}`, {
@@ -49,10 +51,27 @@ const armGate = createCommandGate({
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(job.body),
       signal,
+      priority: 'high',
     });
     return { ok: res.ok, status: res.status };
   },
 });
+
+let driveEpoch = 0;
+let armEpoch = 0;
+
+// Motion is ignored until the Pi is in ONLINE mode. Wait for that lock, but
+// don't sit on it if setmode itself is slow — the hold repeat will send again.
+function afterOnline(epoch, epochRef, submit) {
+  Promise.race([
+    Promise.resolve(noteControlActivity()).catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 400)),
+  ]).then(() => {
+    if (epoch !== epochRef()) return;
+    submit();
+    publish();
+  });
+}
 
 // ── Privileged gate — through Express backend (needs Firebase admin role) ─────
 const privilegedGate = createCommandGate({
@@ -120,8 +139,16 @@ export function sendDriveCommand({ speed = 0, steer = 0, estop = false } = {}) {
   const halt = estop === true || (Number(speed) === 0 && Number(steer) === 0);
   // E-stop aborts a move still on the wire. A normal release waits for that
   // move to land, then sends the stop — otherwise a tap never reaches the Pi.
-  driveGate.submit({ path: '/control', body: { speed, steer, estop } }, { priority: halt, abort: estop === true });
-  publish();
+  if (halt) {
+    driveEpoch += 1;
+    driveGate.submit({ path: '/control', body: { speed, steer, estop } }, { priority: true, abort: estop === true });
+    publish();
+    return;
+  }
+  const epoch = driveEpoch;
+  afterOnline(epoch, () => driveEpoch, () => {
+    driveGate.submit({ path: '/control', body: { speed, steer, estop: false } }, { priority: false, abort: false });
+  });
 }
 
 export function sendArmCommand(command) {
@@ -130,11 +157,22 @@ export function sendArmCommand(command) {
     && command?.clawJ === 0 && command?.claw === 0 && command?.rot === 0;
   // Priority puts the stop next, but do not abort the move already in flight.
   // Aborting it is why a shoulder press never reached the ESP32.
-  armGate.submit(
-    { path: '/arm_control', body: command },
-    { priority: stop || command?.reset === true, abort: false },
-  );
-  publish();
+  if (stop || command?.reset === true) {
+    armEpoch += 1;
+    armGate.submit(
+      { path: '/arm_control', body: command },
+      { priority: true, abort: false },
+    );
+    publish();
+    return;
+  }
+  const epoch = armEpoch;
+  afterOnline(epoch, () => armEpoch, () => {
+    armGate.submit(
+      { path: '/arm_control', body: command },
+      { priority: false, abort: false },
+    );
+  });
 }
 
 export function sendModeCommand(mode) {

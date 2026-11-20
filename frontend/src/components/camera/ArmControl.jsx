@@ -1,9 +1,12 @@
 /**
  * ArmControl — Pi API /arm_control contract.
  *
- * Joint deltas are -1 / 0 / +1. Shoulder rests at ARM_MAX (140), hanging down.
- * UP sends arm:-1 so the position steps toward ARM_MIN. DOWN sends arm:+1.
- * DOWN does nothing until the shoulder has been lifted off the rest stop.
+ * Joint deltas are -1 / 0 / +1. Both pitch joints rest at their high stop
+ * (shoulder at ARM_MAX 140, hanging down). UP sends -1 so the position steps
+ * off that stop. DOWN sends +1 and does nothing until the joint has been lifted.
+ *
+ *   arm  — shoulder 1
+ *   base — shoulder 2 (second pitch joint, Pi channel 0)
  *
  * Hold uses pointer capture. Leaving the button bounds does not release,
  * so a small finger slip cannot abort the move before the Pi receives it.
@@ -46,10 +49,10 @@ const ROWS = [
     pos: { icon: '▲', label: 'UP', bindKey: 'shoulderUp', payload: makeCmd({ arm: -1 }) },
   },
   {
-    label: 'ELBOW',
-    hint: 'Base joint',
-    neg: { icon: '▼', label: 'DOWN', bindKey: 'elbowDown', payload: makeCmd({ base: -1 }) },
-    pos: { icon: '▲', label: 'UP', bindKey: 'elbowUp', payload: makeCmd({ base: +1 }) },
+    label: 'SHOULDER 2',
+    hint: 'Second shoulder — hold UP to lift',
+    neg: { icon: '▼', label: 'DOWN', bindKey: 'elbowDown', payload: makeCmd({ base: +1 }) },
+    pos: { icon: '▲', label: 'UP', bindKey: 'elbowUp', payload: makeCmd({ base: -1 }) },
   },
   {
     label: 'WRIST',
@@ -306,7 +309,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
         {ROWS.map((row, ri) => (
           <div key={row.label}>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 3 }}>
-              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.08em', color: ri === 1 ? '#6ee7b7' : '#94a3b8' }}>
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.08em', color: ri === 1 || ri === 2 ? '#6ee7b7' : '#94a3b8' }}>
                 {row.label}
               </span>
               {row.hint && (
