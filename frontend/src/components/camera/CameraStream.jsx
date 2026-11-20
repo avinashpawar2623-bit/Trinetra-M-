@@ -1,31 +1,36 @@
 import { memo } from 'react';
+import { PI_STREAM_URL } from '../../config/constants';
 
 /**
- * Native MJPEG <img> stream.
+ * Module-level constant — built once at import time, never changes.
+ * Because the url prop is always === STREAM_URL, React's memo() shallow-compare
+ * always returns "equal" → CameraStream NEVER re-renders after initial mount.
+ * The browser owns the MJPEG TCP connection in its C++ network stack.
+ */
+export const STREAM_URL = PI_STREAM_URL;
+
+/**
+ * Lag-free native MJPEG <img>.
  *
- * Rules that keep this lag-free:
- *  1. memo() — React never re-renders this unless `url` changes.
- *     The parent re-renders every 200ms from WebSocket; without memo every
- *     re-render would remount the <img>, closing and reopening the MJPEG TCP
- *     connection → visible stutter.
- *  2. No `key` prop on the <img> — a changing key forces a DOM remount which
- *     is identical to a src change. The browser handles the MJPEG stream
- *     entirely in its C++ network stack once the <img> is mounted.
- *  3. url is a module-level constant from env — never reconstructed inside
- *     a render function, so memo's shallow comparison always returns equal.
+ * Rules that make this work:
+ *  1. memo() — skips re-render when url prop is the same reference.
+ *  2. No key prop — a changing key forces a full DOM remount (= TCP reconnect = stutter).
+ *  3. No onError / onLoad / retryKey — zero extra props that could change.
+ *  4. No hooks — no useState, no useEffect, no useCallback.
+ *  5. url comes from the module-level STREAM_URL constant → never changes.
  */
 const CameraStream = memo(function CameraStream({ url }) {
   return (
     <img
       src={url}
-      alt="live"
+      alt="live feed"
       style={{
         width: '100%',
         height: '100%',
         objectFit: 'contain',
         objectPosition: 'center',
         display: 'block',
-        backgroundColor: '#000',
+        background: '#000',
       }}
       draggable={false}
     />
