@@ -24,14 +24,15 @@ import { useEffect, useRef } from 'react';
  * Props:
  *   imgRef       — React ref for the visible <img> element (driven directly)
  *   snapshotUrl  — full URL for /snapshot endpoint
- *   pauseMs      — optional minimum ms between frames (default 0 = max speed)
+ *   pauseMs      — minimum ms between frames so arm/drive posts can use the link
  *   onFrame(ts)  — called with timestamp on each displayed frame
  *   onError()    — called after MAX_FAIL consecutive failures
  */
 export default function SnapshotStream({
   imgRef,
   snapshotUrl,
-  pauseMs = 0,
+  retryKey = 0,
+  pauseMs = 70,
   onFrame,
   onError,
 }) {
@@ -45,12 +46,14 @@ export default function SnapshotStream({
 
     let active    = true;
     let failCount = 0;
-    const MAX_FAIL = 15;
+    const MAX_FAIL = 4;
 
-    // Off-screen loader image — requests happen here, never shown to user
+    // Off-screen loader. No crossOrigin: that flag requires CORS and the Pi
+    // often does not send it, which made every frame fail and fall back to
+    // the buffered MJPEG stream.
     const loader = new Image();
-    // Allow cross-origin if the Pi sends CORS headers (optional — won't break without them)
-    loader.crossOrigin = 'anonymous';
+    loader.decoding = 'async';
+    loader.fetchPriority = 'low';
 
     function requestNext() {
       if (!active) return;
@@ -98,7 +101,7 @@ export default function SnapshotStream({
       loader.src = ''; // cancel any in-flight load
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshotUrl, pauseMs, imgRef]);
+  }, [snapshotUrl, pauseMs, imgRef, retryKey]);
 
   return null;
 }

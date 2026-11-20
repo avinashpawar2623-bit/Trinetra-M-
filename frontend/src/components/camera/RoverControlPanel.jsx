@@ -3,10 +3,10 @@
  * Motion is not tied to the sensor websocket — a stale telemetry link
  * must not freeze the sticks while HTTP to the Pi still works.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import DriveControl from './DriveControl';
 import ArmControl from './ArmControl';
-import { sendArmCommand, sendDriveCommand, usePiApi } from '../../hooks/usePiApi';
+import { usePiApi } from '../../hooks/usePiApi';
 import { useControlStats } from '../../hooks/useControlStats';
 import { engageDashboard, releaseToRemote, startModeKeepalive, subscribeDashboardMode } from '../../lib/dashboardMode';
 
@@ -23,21 +23,9 @@ export default function RoverControlPanel({ disabled = false }) {
   const [driveSpeed, setDriveSpeed] = useState(DRIVE_SPEED_DEFAULT);
   const [armSpeed, setArmSpeed] = useState(ARM_SPEED_DEFAULT);
   const [online, setOnline] = useState(false);
-  const wasLive = useRef(false);
 
   useEffect(() => startModeKeepalive(), []);
   useEffect(() => subscribeDashboardMode(setOnline), []);
-
-  useEffect(() => {
-    if (link === 'live') {
-      wasLive.current = true;
-      return;
-    }
-    if (!wasLive.current) return;
-    wasLive.current = false;
-    sendDriveCommand({ speed: 0, steer: 0, estop: false });
-    sendArmCommand({ base: 0, arm: 0, wrist: 0, clawJ: 0, claw: 0, rot: 0, speed: 5, reset: false });
-  }, [link]);
 
   return (
     <div className="cockpit-controls">

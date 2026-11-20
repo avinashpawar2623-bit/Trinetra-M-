@@ -5,12 +5,19 @@ import { useFullscreen } from '../../hooks/useFullscreen';
 import { usePiApi } from '../../hooks/usePiApi';
 import { isDetectionFresh } from '../../lib/detections';
 import CameraStream from './CameraStream';
+import SnapshotStream from './SnapshotStream';
 import DetectionOverlay from './DetectionOverlay';
 import DetectionSummary from './DetectionSummary';
 import CameraOffline from './CameraOffline';
 import LoadingState from '../layout/LoadingState';
 
 const EMPTY = [];
+
+/** One JPEG per request. A long-lived /stream buffers in the browser and holds the Pi. */
+function toSnapshotUrl(streamUrl) {
+  if (typeof streamUrl !== 'string' || !/\/stream(?=$|\?)/.test(streamUrl)) return '';
+  return streamUrl.replace(/\/stream(?=$|\?)/, '/snapshot');
+}
 
 /**
  * Isolated fps badge — subscribes to WebSocket on its own.
@@ -28,16 +35,9 @@ const FpsDisplay = memo(function FpsDisplay() {
 });
 
 /**
- * Live camera feed — native MJPEG <img src>.
- *
- * Key design decisions to prevent stream interruption:
- *
- *  1. CameraStream is memo'd — React skips it on every sensor update.
- *  2. onError / onLoad are useCallback — stable references, so memo works.
- *  3. usePiApi (WebSocket) is ONLY called inside FpsDisplay (isolated sibling).
- *     Sensor state changes never reach CameraStream's subtree.
- *  4. streamUrl is a module-level constant from env — never reconstructed
- *     inside a render function.
+ * Live camera. Prefer single-JPEG snapshots so the picture stays on the newest
+ * frame and the Pi is free between frames to accept arm and drive commands.
+ * MJPEG is only the fallback when /snapshot cannot be reached.
  */
 export default function CameraPanel({ detections, now, onStreamStatus }) {
   const camera       = useCameraConfig();
@@ -48,9 +48,17 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
   const [retryKey,    setRetryKey]    = useState(0);
   const [failedKey,   setFailedKey]   = useState(null);
   const [reconnects,  setReconnects]  = useState(0);
+  const [transport,   setTransport]   = useState('snapshot');
+  const frameRef = useRef(null);
+  const snapshotUrl = toSnapshotUrl(camera.streamUrl);
+  const useSnapshot = transport === 'snapshot' && Boolean(snapshotUrl);
 
   const attemptKey = `${camera.streamUrl}|${retryKey}`;
   const offline    = failedKey === attemptKey;
+
+  useEffect(() => {
+    setTransport(snapshotUrl ? 'snapshot' : 'mjpeg');
+  }, [snapshotUrl]);
 
   // Auto-retry after offline with exponential back-off (1s → 2s → 4s … 15s)
   useEffect(() => {
@@ -75,10 +83,15 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
     setFailedKey(null);
   }, []);
 
+  const handleSnapFail = useCallback(() => {
+    setTransport('mjpeg');
+  }, []);
+
   const handleRetry = useCallback(() => {
     setRetryKey((k) => k + 1);
     setFailedKey(null);
-  }, []);
+    setTransport(snapshotUrl ? 'snapshot' : 'mjpeg');
+  }, [snapshotUrl]);
 
   // Detection overlay — isolated from sensor WebSocket
   const payload        = detections.data;
@@ -92,7 +105,7 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
 
   const streamLabel = offline
     ? `offline · retry ${reconnects}`
-    : reconnects > 0 ? `live · ${reconnects} reconnects` : 'live';
+    : `${useSnapshot ? 'snapshot' : 'mjpeg'}${reconnects > 0 ? ` · ${reconnects} reconnects` : ''}`;
 
   useEffect(() => {
     onStreamStatus?.({ label: streamLabel, reconnects, freshness: 'unknown' });
@@ -176,12 +189,38 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
               uninterrupted for the full session.
               handleError / handleLoad are useCallback — stable refs = memo works.
             */}
-            <CameraStream
-              url={camera.streamUrl}
-              retryKey={retryKey}
-              onError={handleError}
-              onLoad={handleLoad}
-            />
+            {useSnapshot ? (
+              <>
+                <img
+                  ref={frameRef}
+                  alt="TRINETRA Camera"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    objectPosition: 'center',
+                    display: 'block',
+                    background: '#000',
+                  }}
+                  draggable={false}
+                />
+                <SnapshotStream
+                  imgRef={frameRef}
+                  snapshotUrl={snapshotUrl}
+                  retryKey={retryKey}
+                  pauseMs={70}
+                  onFrame={handleLoad}
+                  onError={handleSnapFail}
+                />
+              </>
+            ) : (
+              <CameraStream
+                url={camera.streamUrl}
+                retryKey={retryKey}
+                onError={handleError}
+                onLoad={handleLoad}
+              />
+            )}
 
             {showOverlay && (
               <DetectionOverlay

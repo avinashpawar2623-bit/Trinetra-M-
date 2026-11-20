@@ -12,7 +12,6 @@
     "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "test": "node --test test/*.test.js"
   },
-  1
   "dependencies": {
     "express": "^5.2.1",
     "firebase-admin": "^13.6.0"
