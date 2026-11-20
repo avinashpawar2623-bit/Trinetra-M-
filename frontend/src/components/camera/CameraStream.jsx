@@ -29,12 +29,11 @@ const CameraStream = memo(function CameraStream({ url, retryKey, onError, onLoad
       style={{
         width: '100%',
         height: '100%',
-        objectFit: 'contain',
+        objectFit: 'cover',
         objectPosition: 'center',
         display: 'block',
         imageRendering: 'crisp-edges',
         WebkitImageRendering: 'crisp-edges',
-        backgroundColor: '#000',
       }}
       onError={onError}
       onLoad={onLoad}
