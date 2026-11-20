@@ -98,7 +98,7 @@ export const BATTERY_THRESHOLDS = {
 
 // ---- Camera ---------------------------------------------------------------
 /** '4/3' (ESP32-CAM default VGA) or '16/9'. */
-export const CAMERA_ASPECT_RATIO = '4/3';
+export const CAMERA_ASPECT_RATIO = '16/9';
 /** Backend proxy endpoint for the MJPEG stream. */
 export const CAMERA_PROXY_PATH = resolveApiUrl('api/camera/stream', API_BASE_URL);
 /**

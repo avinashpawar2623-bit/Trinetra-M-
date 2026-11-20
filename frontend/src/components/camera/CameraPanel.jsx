@@ -129,7 +129,7 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
       <div
         ref={containerRef}
         className={`relative w-full overflow-hidden bg-black ${isFullscreen ? 'h-full' : 'rounded-lg'}`}
-        style={isFullscreen ? undefined : { aspectRatio: CAMERA_ASPECT_RATIO }}
+        style={isFullscreen ? undefined : { aspectRatio: CAMERA_ASPECT_RATIO, maxWidth: '100%' }}
       >
         {camera.loading ? (
           <div className="absolute inset-0 flex items-center justify-center">
