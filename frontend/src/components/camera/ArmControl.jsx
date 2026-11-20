@@ -20,7 +20,7 @@
  * Button layout (6 rows, no pump):
  *   ROTATE    : [↻ CW / Q]    [↺ CCW / E]   → rot: +1 / rot: -1
  *   [ROT SPEED slider 1–5, default 2]
- *   SHOULDER  : [▲ UP / R]    [▼ DOWN / F]  → arm: +1 / arm: -1
+ *   SHOULDER  : [▲ UP / R]    [▼ DOWN / F]  → arm: -1 / arm: +1  (posArm starts at ARM_MAX=140; -1 decrements = movement)
  *   ELBOW     : [▲ UP / T]    [▼ DOWN / G]  → base: +1 / base: -1
  *   WRIST     : [▲ UP / Y]    [▼ DOWN / H]  → wrist: +1 / wrist: -1
  *   CLAW JT   : [▲ UP / U]    [▼ DOWN / J]  → clawJ: +1 / clawJ: -1
@@ -88,8 +88,9 @@ const ROWS = [
   },
   {
     label: 'SHOULDER',
-    neg: { icon: '▼', label: 'DOWN', bindKey: 'shoulderDown', payload: makeCmd({ arm: -1 }) },
-    pos: { icon: '▲', label: 'UP',   bindKey: 'shoulderUp',   payload: makeCmd({ arm: +1 }) },
+    // posArm starts at ARM_MAX=140; arm:-1 decrements → physical upward movement
+    neg: { icon: '▼', label: 'DOWN', bindKey: 'shoulderDown', payload: makeCmd({ arm: +1 }) },
+    pos: { icon: '▲', label: 'UP',   bindKey: 'shoulderUp',   payload: makeCmd({ arm: -1 }) },
   },
   {
     label: 'ELBOW',
@@ -197,20 +198,28 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
   const rotSpeedRef   = useRef(2);   // 1–5, used for rot commands
   const bindingsRef   = useRef(bindings);
   const modeSetRef    = useRef(false); // tracks if ONLINE mode was sent this session
+  const lastPressRef  = useRef(0);    // timestamp of last arm button press
 
   disabledRef.current = disabled;
   armSpeedRef.current = armSpeed;
   bindingsRef.current = bindings;
 
-  // ── Send SETMODE ONLINE on mount + repeat every 2s while panel is visible ──
-  // The physical remote sends UDP every 50ms which resets remoteMode.
-  // Repeating every 2s overwrites it frequently enough for arm commands to land.
+  // ── Send SETMODE ONLINE on mount + repeat every 2s ONLY while actively using arm ──
+  // Physical remote UDP every 50ms resets remoteMode. We counter with SETMODE every 2s
+  // but STOP after 5s of idle so the physical remote can reclaim control naturally.
   useEffect(() => {
     const doSend = () => {
-      sendOnlineMode()
-        .then(r => { console.log('[MODE] SETMODE OK:', r.status); setOnlineOk(true); })
-        .catch(e => { console.error('[MODE] SETMODE FAILED:', e); setOnlineOk(false); });
+      const idle = Date.now() - lastPressRef.current;
+      if (idle < 5000) {
+        // User is actively using arm — keep ONLINE mode locked
+        sendOnlineMode()
+          .then(r => { console.log('[MODE] SETMODE OK:', r.status); setOnlineOk(true); })
+          .catch(e => { console.error('[MODE] SETMODE FAILED:', e); setOnlineOk(false); });
+      }
+      // else: idle > 5s — stop sending so physical remote can reclaim control
     };
+    // Stamp lastPressRef so the first send fires immediately on mount
+    lastPressRef.current = Date.now();
     doSend(); // immediate on mount
     const id = setInterval(doSend, 2000); // repeat every 2s
     return () => clearInterval(id); // cleanup on unmount
@@ -229,6 +238,7 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
 
   function startHold(id, basePayload, isRotate) {
     if (disabledRef.current) return;
+    lastPressRef.current = Date.now(); // stamp — keeps SETMODE interval active
     ensureOnlineMode();
     // Use rotSpeedRef for rotation row, armSpeedRef for all others
     const speed = isRotate ? rotSpeedRef.current : armSpeedRef.current;
@@ -349,50 +359,39 @@ export default function ArmControl({ disabled = false, armSpeed = 5 }) {
         }}>
           {onlineOk ? '● ONLINE' : '● OFFLINE'}
         </div>
+        {/* Release button — give control back to physical remote */}
+        <button
+          type="button"
+          tabIndex={-1}
+          title="Give control back to physical remote"
+          onClick={() => {
+            fetch(`${PI_BASE_URL}/setmode`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mode: 'REMOTE' }),
+            })
+              .then(() => {
+                lastPressRef.current = 0; // reset idle timer so interval stops sending ONLINE
+                setOnlineOk(false);
+                console.log('[ARM] Released control → REMOTE mode');
+              })
+              .catch(e => console.warn('[ARM] Release failed', e));
+          }}
+          style={{
+            padding: '4px 10px',
+            background: '#c0392b',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.03em',
+          }}
+        >
+          🔓 Release
+        </button>
       </div>
-
-      {/* TODO: remove after debug — RAW shoulder test button */}
-      <button
-        type="button"
-        tabIndex={-1}
-        onClick={async () => {
-          console.log('[RAW] Step 1: sending SETMODE ONLINE...');
-          try {
-            const r1 = await fetch(`${PI_BASE_URL}/setmode`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ mode: 'ONLINE' }),
-            });
-            const j1 = await r1.json().catch(() => ({}));
-            console.log('[RAW] SETMODE response:', r1.status, j1);
-          } catch (e) {
-            console.error('[RAW] SETMODE FAILED:', e);
-            return;
-          }
-          await new Promise(res => setTimeout(res, 300));
-          console.log('[RAW] Step 2: sending shoulder UP...');
-          try {
-            const r2 = await fetch(`${PI_BASE_URL}/arm_control`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ base: 0, arm: 1, wrist: 0, clawJ: 0, claw: 0, rot: 0, speed: 5, reset: false }),
-            });
-            const j2 = await r2.json().catch(() => ({}));
-            console.log('[RAW] ARM response:', r2.status, j2);
-          } catch (e) {
-            console.error('[RAW] ARM FAILED:', e);
-          }
-        }}
-        style={{
-          width: '100%', padding: '8px 0', marginBottom: 10,
-          borderRadius: 8, border: '1px solid #f97316',
-          background: 'rgba(249,115,22,0.08)',
-          color: '#f97316', fontSize: 11, fontWeight: 700,
-          cursor: 'pointer', letterSpacing: '0.05em',
-        }}
-      >
-        🔧 RAW SHOULDER UP TEST
-      </button>
 
       {/* Status dot */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 11, color: C.textDim, fontFamily: 'monospace' }}>
