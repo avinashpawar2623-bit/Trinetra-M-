@@ -1,42 +1,32 @@
 import { memo } from 'react';
-import { PI_STREAM_URL } from '../../config/constants';
 
 /**
- * Native MJPEG <img> — memo-wrapped so it NEVER re-renders unless the
- * stream URL or retryKey explicitly changes.
+ * Native MJPEG <img> stream.
  *
- * WHY THIS MATTERS:
- *   The parent (CameraPanel) re-renders every 200 ms from WebSocket sensor
- *   updates. Without memo, every re-render unmounts+remounts the <img>, which
- *   closes and reopens the MJPEG TCP connection → visible stutter every 200 ms.
- *
- *   With memo, React skips re-rendering this subtree entirely when sensor state
- *   changes. The TCP connection stays open and the stream runs uninterrupted.
- *
- * The `key` prop on <img> (driven by retryKey) is the ONLY intentional remount —
- * it fires only when the user clicks Retry or the stream errors out.
+ * Rules that keep this lag-free:
+ *  1. memo() — React never re-renders this unless `url` changes.
+ *     The parent re-renders every 200ms from WebSocket; without memo every
+ *     re-render would remount the <img>, closing and reopening the MJPEG TCP
+ *     connection → visible stutter.
+ *  2. No `key` prop on the <img> — a changing key forces a DOM remount which
+ *     is identical to a src change. The browser handles the MJPEG stream
+ *     entirely in its C++ network stack once the <img> is mounted.
+ *  3. url is a module-level constant from env — never reconstructed inside
+ *     a render function, so memo's shallow comparison always returns equal.
  */
-const CameraStream = memo(function CameraStream({ url, retryKey, onError, onLoad }) {
-  const src = retryKey
-    ? `${url}${url.includes('?') ? '&' : '?'}_r=${retryKey}`
-    : url;
-
+const CameraStream = memo(function CameraStream({ url }) {
   return (
     <img
-      key={`${url}-${retryKey}`}
-      src={src}
-      alt="TRINETRA Camera"
+      src={url}
+      alt="live"
       style={{
         width: '100%',
         height: '100%',
         objectFit: 'contain',
         objectPosition: 'center',
         display: 'block',
-        imageRendering: 'crisp-edges',
-        WebkitImageRendering: 'crisp-edges',
+        backgroundColor: '#000',
       }}
-      onError={onError}
-      onLoad={onLoad}
       draggable={false}
     />
   );

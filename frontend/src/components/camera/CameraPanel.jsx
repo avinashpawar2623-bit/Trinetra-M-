@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CAMERA_ASPECT_RATIO, OVERLAY_MIN_CONFIDENCE } from '../../config/constants';
+import { OVERLAY_MIN_CONFIDENCE } from '../../config/constants';
 import { useCameraConfig } from '../../hooks/useCameraConfig';
 import { useFullscreen } from '../../hooks/useFullscreen';
 import { usePiApi } from '../../hooks/usePiApi';
@@ -12,15 +12,9 @@ import LoadingState from '../layout/LoadingState';
 
 const EMPTY = [];
 
-/** One JPEG per request. A long-lived /stream buffers in the browser and holds the Pi. */
-function toSnapshotUrl(streamUrl) {
-  if (typeof streamUrl !== 'string' || !/\/stream(?=$|\?)/.test(streamUrl)) return '';
-  return streamUrl.replace(/\/stream(?=$|\?)/, '/snapshot');
-}
-
 /**
  * Isolated fps badge — subscribes to WebSocket on its own.
- * Sensor updates re-render ONLY this tiny component, not CameraPanel or CameraStream.
+ * Sensor updates re-render ONLY this tiny component, never CameraStream.
  */
 const FpsDisplay = memo(function FpsDisplay() {
   const { sensors } = usePiApi();
@@ -34,9 +28,13 @@ const FpsDisplay = memo(function FpsDisplay() {
 });
 
 /**
- * Live camera. Prefer single-JPEG snapshots so the picture stays on the newest
- * frame and the Pi is free between frames to accept arm and drive commands.
- * MJPEG is only the fallback when /snapshot cannot be reached.
+ * Live camera panel — always uses native MJPEG <img> (CameraStream).
+ *
+ * No snapshot polling, no JS fetch loop, no transport switching.
+ * The browser handles MJPEG in its C++ network stack — zero JS per frame.
+ *
+ * CameraStream is memo()'d so the WebSocket sensor updates (every 200ms)
+ * never reach it — the TCP connection stays open and uninterrupted.
  */
 export default function CameraPanel({ detections, now, onStreamStatus }) {
   const camera       = useCameraConfig();
@@ -44,40 +42,26 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
   const { isFullscreen, toggle: toggleFullscreen, supported: fullscreenSupported } = useFullscreen(containerRef);
 
   const [showOverlay, setShowOverlay] = useState(true);
-  const [retryKey,    setRetryKey]    = useState(0);
-  const [failedKey,   setFailedKey]   = useState(null);
+  const [offline,     setOffline]     = useState(false);
   const [reconnects,  setReconnects]  = useState(0);
-  // Always use native MJPEG <img> — snapshot polling causes JS-driven lag
-
-  const attemptKey = `${camera.streamUrl}|${retryKey}`;
-  const offline    = failedKey === attemptKey;
 
   // Auto-retry after offline with exponential back-off (1s → 2s → 4s … 15s)
   useEffect(() => {
     if (!offline) return undefined;
-    const delay = Math.min(15_000, 1000 * (2 ** Math.min(reconnects, 4)));
+    const delay = Math.min(15_000, 1_000 * (2 ** Math.min(reconnects, 4)));
     const timer = setTimeout(() => {
       setReconnects((c) => c + 1);
-      setRetryKey((k) => k + 1);
-      setFailedKey(null);
+      setOffline(false);
     }, delay);
     return () => clearTimeout(timer);
   }, [offline, reconnects]);
 
   // Stable callbacks — same reference across renders so CameraStream memo works
-  const handleError = useCallback(() => {
-    setFailedKey((prev) => prev ?? attemptKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [retryKey, camera.streamUrl]);
-
-  const handleLoad = useCallback(() => {
-    // Stream connected — clear any previous failed state
-    setFailedKey(null);
-  }, []);
-
+  const handleError = useCallback(() => setOffline(true),  []);
+  const handleLoad  = useCallback(() => setOffline(false), []);
   const handleRetry = useCallback(() => {
-    setRetryKey((k) => k + 1);
-    setFailedKey(null);
+    setOffline(false);
+    setReconnects(0);
   }, []);
 
   // Detection overlay — isolated from sensor WebSocket
@@ -107,7 +91,6 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
           <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-slate-500">
             via {camera.source}
           </span>
-          {/* FpsDisplay has its own usePiApi subscription — sensor updates only re-render this */}
           <FpsDisplay />
           <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-slate-400">
             {streamLabel}
@@ -126,24 +109,24 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
       </div>
 
       {/* ── Camera frame ── */}
+      {/* @keyframes for LIVE dot */}
+      <style>{`@keyframes livePulse{0%,100%{opacity:1}50%{opacity:0.25}}`}</style>
       <div
         ref={containerRef}
-        style={isFullscreen ? { width: '100%', height: '100%', background: '#000', position: 'relative' } : {
-          width: '100%',
-          aspectRatio: CAMERA_ASPECT_RATIO,
-          maxHeight: '52vh',
-          marginInline: 'auto',
-          backgroundColor: '#000',
-          borderRadius: 10,
-          overflow: 'hidden',
-          position: 'relative',
-          boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 4px 24px rgba(0,0,0,0.6)',
-        }}
+        style={isFullscreen
+          ? { width: '100%', height: '100%', background: '#000', position: 'relative' }
+          : {
+            width: '100%',
+            aspectRatio: '4/3',
+            backgroundColor: '#000',
+            borderRadius: 8,
+            overflow: 'hidden',
+            position: 'relative',
+            boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 4px 24px rgba(0,0,0,0.5)',
+          }
+        }
       >
-        {/* Keyframes for LIVE dot pulse */}
-        <style>{`@keyframes livePulse{0%,100%{opacity:1}50%{opacity:0.25}}`}</style>
-
-        {/* LIVE badge — top-left overlay */}
+        {/* LIVE badge */}
         {!offline && (
           <div style={{
             position: 'absolute', top: 8, left: 8, zIndex: 10,
@@ -151,7 +134,6 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
             padding: '3px 9px', borderRadius: 5, fontSize: 11,
             fontWeight: 700, letterSpacing: '0.08em',
             display: 'flex', alignItems: 'center', gap: 5,
-            backdropFilter: 'blur(4px)',
             pointerEvents: 'none',
           }}>
             <span style={{
@@ -162,6 +144,7 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
             LIVE
           </div>
         )}
+
         {camera.loading ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <LoadingState label="Resolving camera URL…" />
@@ -171,14 +154,12 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
         ) : (
           <>
             {/*
-              CameraStream is memo'd — will NOT re-render on sensor WebSocket
-              updates (every 200ms). The MJPEG TCP connection stays open and
-              uninterrupted for the full session.
-              handleError / handleLoad are useCallback — stable refs = memo works.
+              CameraStream is memo()'d. It NEVER re-renders from sensor WebSocket
+              updates. The MJPEG TCP connection stays open the entire session.
+              handleError / handleLoad are useCallback — stable refs keep memo valid.
             */}
             <CameraStream
               url={camera.streamUrl}
-              retryKey={retryKey}
               onError={handleError}
               onLoad={handleLoad}
             />
