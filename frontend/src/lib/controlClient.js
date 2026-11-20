@@ -26,7 +26,7 @@ const listeners = new Set();
 
 // ── Drive gate — direct to Pi, no auth header needed ─────────────────────────
 const driveGate = createCommandGate({
-  timeoutMs: 300,                       // 300ms: short enough to drop stale key-releases, Pi RTT ~50–150ms
+  timeoutMs: 800,                       // Tailscale RTT often exceeds 300ms; aborting early drops the move
   onUpdate: () => publish(),
   send: async (job, { signal }) => {
     const res = await fetch(`${PI_BASE_URL}${job.path}`, {
@@ -44,8 +44,6 @@ const armGate = createCommandGate({
   timeoutMs: 500,
   onUpdate: () => publish(),
   send: async (job, { signal }) => {
-    // Trace log — verify path and body before every arm fetch
-    console.log('[GATE] arm fetch to:', PI_BASE_URL + job.path, 'body:', JSON.stringify(job.body));
     const res = await fetch(`${PI_BASE_URL}${job.path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -110,7 +108,6 @@ export function subscribeControlStats(fn) {
 
 export function setCommandTimeoutMs(ms) {
   driveGate.setTimeoutMs(ms);
-  armGate.setTimeoutMs(ms);
   publish();
 }
 
@@ -120,7 +117,10 @@ export function sendDriveCommand({ speed = 0, steer = 0, estop = false } = {}) {
     publish();
     return;
   }
-  driveGate.submit({ path: '/control', body: { speed, steer, estop } }, { priority: estop === true });
+  const halt = estop === true || (Number(speed) === 0 && Number(steer) === 0);
+  // E-stop aborts a move still on the wire. A normal release waits for that
+  // move to land, then sends the stop — otherwise a tap never reaches the Pi.
+  driveGate.submit({ path: '/control', body: { speed, steer, estop } }, { priority: halt, abort: estop === true });
   publish();
 }
 
@@ -128,7 +128,12 @@ export function sendArmCommand(command) {
   if (!canControlRover(role)) return;
   const stop = command?.base === 0 && command?.arm === 0 && command?.wrist === 0
     && command?.clawJ === 0 && command?.claw === 0 && command?.rot === 0;
-  armGate.submit({ path: '/arm_control', body: command }, { priority: stop || command?.reset === true });
+  // Priority puts the stop next, but do not abort the move already in flight.
+  // Aborting it is why a shoulder press never reached the ESP32.
+  armGate.submit(
+    { path: '/arm_control', body: command },
+    { priority: stop || command?.reset === true, abort: false },
+  );
   publish();
 }
 

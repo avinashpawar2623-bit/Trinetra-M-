@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from 'react';
 import { sendDriveCommand } from '../../hooks/usePiApi';
 import { useControlStats } from '../../hooks/useControlStats';
 import { useKeybindings } from '../../hooks/useKeybindings';
+import { noteControlActivity } from '../../lib/dashboardMode';
 
 const isMobile = () => window.innerWidth < 768;
 
@@ -63,17 +64,17 @@ const S = {
   },
   dpadWrap: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr 1fr',
-    gridTemplateRows: '1fr 1fr',
+    gridTemplateColumns: 'repeat(3, 64px)',
+    gridTemplateRows: 'repeat(3, 64px)',
     gap: 6,
-    justifyItems: 'center',
+    justifyContent: 'center',
     marginBottom: 10,
   },
   btn: (active) => ({
-    width: isMobile() ? 72 : 64,
-    height: isMobile() ? 72 : 64,
-    minWidth: isMobile() ? 72 : 64,
-    minHeight: isMobile() ? 72 : 64,
+    width: 64,
+    height: 64,
+    minWidth: 64,
+    minHeight: 64,
     borderRadius: 14,
     border: `2px solid ${active ? '#e94560' : '#0f3460'}`,
     background: active
@@ -219,6 +220,7 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
       const p = pressedRef.current;
       if (!p.forward && !p.backward && !p.left && !p.right) return;
       const { speed, steer } = computeCmd();
+      noteControlActivity();
       sendDrive(speed, steer);
     }, 100);
     return () => clearInterval(iv);
@@ -229,7 +231,8 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     pressedRef.current[key] = true;
     setHeldKeys(prev => ({ ...prev, [key]: true }));
     const { speed, steer } = computeCmd();
-    sendDrive(speed, steer); // immediate first command
+    noteControlActivity();
+    sendDrive(speed, steer);
   };
 
   const release = (key) => {
@@ -262,6 +265,17 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
     function onKeyDown(e) {
       if (isFormField(document.activeElement)) return;
       if (SCROLL_PREVENT.has(e.code)) e.preventDefault();
+      if (e.code === bindingsRef.current.eStop) {
+        if (down.has(e.code)) return;
+        down.add(e.code);
+        pressedRef.current = { forward: false, backward: false, left: false, right: false };
+        setHeldKeys({ forward: false, backward: false, left: false, right: false });
+        estopRef.current = true;
+        setEstop(true);
+        sendDriveCommand({ speed: 0, steer: 0, estop: true });
+        document.body.style.overflow = '';
+        return;
+      }
       const dir = codeToDir(e.code);
       if (!dir || down.has(e.code)) return;
       down.add(e.code);
@@ -271,18 +285,28 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
 
     function onKeyUp(e) {
       if (isFormField(document.activeElement)) return;
+      down.delete(e.code);
       const dir = codeToDir(e.code);
       if (!dir) return;
-      down.delete(e.code);
       release(dir);
       if (down.size === 0) document.body.style.overflow = '';
     }
 
+    function onBlur() {
+      down.clear();
+      pressedRef.current = { forward: false, backward: false, left: false, right: false };
+      setHeldKeys({ forward: false, backward: false, left: false, right: false });
+      if (!estopRef.current) sendDrive(0, 0);
+      document.body.style.overflow = '';
+    }
+
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup',   onKeyUp);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup',   onKeyUp);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
       document.body.style.overflow = '';
     };
   }, []);
@@ -302,13 +326,20 @@ export default function DriveControl({ disabled = false, driveSpeed = 70, link =
 
   function btnProps(key) {
     return {
-      onPointerDown:  (e) => { e.currentTarget.setPointerCapture(e.pointerId); press(key); },
-      onPointerUp:    ()  => release(key),
-      onPointerLeave: ()  => release(key),
-      onPointerCancel:()  => release(key),
-      onTouchStart: (e) => { e.preventDefault(); press(key); },
-      onTouchEnd:   (e) => { e.preventDefault(); release(key); },
-      onTouchCancel:(e) => { e.preventDefault(); release(key); },
+      onPointerDown: (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        press(key);
+      },
+      onPointerUp: (e) => {
+        if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+        release(key);
+      },
+      onPointerCancel: () => release(key),
+      onContextMenu: (e) => e.preventDefault(),
     };
   }
 

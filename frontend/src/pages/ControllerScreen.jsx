@@ -1,9 +1,6 @@
-import { lazy, Suspense } from 'react';
 import Header from '../components/layout/Header';
 import LogoutButton from '../components/auth/LogoutButton';
-import LoadingState from '../components/layout/LoadingState';
-
-const RoverControlPanel = lazy(() => import('../components/camera/RoverControlPanel'));
+import Cockpit from '../components/operate/Cockpit';
 
 export default function ControllerScreen({ user, navigate }) {
   return (
@@ -17,10 +14,8 @@ export default function ControllerScreen({ user, navigate }) {
         link="controller"
         actions={<LogoutButton email={user.email} />}
       />
-      <main className="mx-auto max-w-3xl px-4 py-4">
-        <Suspense fallback={<div className="card"><LoadingState label="Loading controller…" /></div>}>
-          <RoverControlPanel />
-        </Suspense>
+      <main className="mx-auto max-w-7xl px-4 py-4">
+        <Cockpit />
       </main>
     </div>
   );

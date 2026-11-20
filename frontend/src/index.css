@@ -708,3 +708,84 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Operate cockpit: camera and both controllers on one screen. */
+.cockpit-grid {
+  display: grid;
+  gap: 0.75rem;
+  align-items: start;
+}
+@media (min-width: 1024px) {
+  .cockpit-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.85fr);
+  }
+  .cockpit-stage {
+    position: sticky;
+    top: 0.75rem;
+  }
+}
+.cockpit-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border-radius: 0.875rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: linear-gradient(160deg, rgb(15 23 42 / 0.92), rgb(2 6 23 / 0.88));
+}
+.cockpit-controls-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.cockpit-kicker {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #34d399;
+}
+.cockpit-title {
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #94a3b8;
+}
+.cockpit-meta {
+  font-size: 0.68rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #64748b;
+}
+.cockpit-lock {
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+}
+.cockpit-lock-on {
+  border-color: #b91c1c;
+  background: #7f1d1d;
+  color: #fecaca;
+}
+.arm-dock {
+  padding: 0.75rem;
+  border-radius: 0.85rem;
+  border: 1px solid #2a2a4a;
+  background: #0d0d1a;
+}
+.sensor-strip {
+  display: grid;
+  gap: 0.75rem;
+}
+@media (min-width: 768px) {
+  .sensor-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+}

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { useState } from 'react';
 import { useRoverSensors } from '../hooks/useRoverSensors';
 import { useRoverStatus } from '../hooks/useRoverStatus';
 import { useDetections } from '../hooks/useDetections';
@@ -15,12 +15,11 @@ import GasFlamePanel from '../components/sensors/GasFlamePanel';
 import DistancePanel from '../components/sensors/DistancePanel';
 import ClimatePanel from '../components/sensors/ClimatePanel';
 import WaterPumpCard from '../components/sensors/WaterPumpCard';
-import MainViewPanel from '../components/MainViewPanel';
 import EventLog from '../components/events/EventLog';
 import SystemHealth from '../components/layout/SystemHealth';
 import SensorDebugPanel from '../components/layout/SensorDebugPanel';
 import SettingsPanel from '../components/SettingsPanel';
-const RoverControlPanel = lazy(() => import('../components/camera/RoverControlPanel'));
+import Cockpit from '../components/operate/Cockpit';
 
 export default function Dashboard({ headerActions, role, navigate, sessionError }) {
   const sensors = useRoverSensors();
@@ -48,59 +47,35 @@ export default function Dashboard({ headerActions, role, navigate, sessionError 
         link={link}
       />
 
-      <main className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          <section id="overview" className="card">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Rover overview</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Telemetry link <span className="font-mono text-slate-200">{link}</span>
-              {sensors.data?.updatedAt ? ` · sample ${Math.max(0, now - sensors.data.updatedAt)} ms old` : ''}.
-              {sessionError ? ` ${sessionError}` : ''}
-            </p>
-          </section>
+      <main className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4">
+        {sessionError && <ErrorState title="Session" message={sessionError} />}
+        <Cockpit onStreamStatus={setCamera} controls={showController} />
 
-          <section id="camera">
-            <MainViewPanel
-              sensors={sensors.data}
-              online={online}
-              lastSeen={status.data?.lastSeen ?? null}
-              detections={detections}
-              now={now}
-              onStreamStatus={setCamera}
-            />
-          </section>
-
-          <section id="sensors" className="space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Real-time sensors</h2>
-            {sensors.error && <ErrorState title="Sensor feed error" message={sensors.error} />}
-            {sensors.loading ? (
-              <div className="card"><LoadingState label="Waiting for sensor data…" /></div>
-            ) : (
-              <ClimatePanel sensors={sensors.data} />
-            )}
-          </section>
-
-          {showController && (
-            <section id="controller" className="space-y-2">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Rover controller</h2>
-              <Suspense fallback={<div className="card"><LoadingState label="Loading controller…" /></div>}>
-                <RoverControlPanel />
-              </Suspense>
-            </section>
-          )}
-        </div>
-
-        <aside className="space-y-4">
+        <section id="sensors" className="sensor-strip">
           {status.error && <ErrorState title="Status feed error" message={status.error} />}
+          {sensors.error && <ErrorState title="Sensor feed error" message={sensors.error} />}
           <GasFlamePanel sensors={sensors.data} online={status.loading ? null : online} />
           <WaterPumpCard sensors={sensors.data} link={link} now={now} />
           <DistancePanel sensors={sensors.data} />
-          <section id="events">
+          {sensors.loading ? (
+            <div className="card"><LoadingState label="Waiting for sensor data…" /></div>
+          ) : (
+            <ClimatePanel sensors={sensors.data} />
+          )}
+        </section>
+
+        <details className="card">
+          <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Log and diagnostics
+          </summary>
+          <div className="mt-3 grid gap-4 lg:grid-cols-2">
             <EventLog now={now} />
-          </section>
-          <SystemHealth link={link} diagnostics={diagnostics} camera={camera} />
-          <SensorDebugPanel sensors={sensors.data} diagnostics={diagnostics} />
-        </aside>
+            <div className="space-y-4">
+              <SystemHealth link={link} diagnostics={diagnostics} camera={camera} />
+              <SensorDebugPanel sensors={sensors.data} diagnostics={diagnostics} />
+            </div>
+          </div>
+        </details>
       </main>
     </div>
   );

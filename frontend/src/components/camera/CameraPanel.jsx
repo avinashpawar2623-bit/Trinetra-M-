@@ -131,6 +131,8 @@ export default function CameraPanel({ detections, now, onStreamStatus }) {
         style={isFullscreen ? { width: '100%', height: '100%', background: '#000', position: 'relative' } : {
           width: '100%',
           aspectRatio: CAMERA_ASPECT_RATIO,
+          maxHeight: '52vh',
+          marginInline: 'auto',
           backgroundColor: '#000',
           borderRadius: 10,
           overflow: 'hidden',

@@ -62,10 +62,12 @@ export function createCommandGate({ timeoutMs = 350, send, onUpdate }) {
     }
   }
 
-  function submit(job, { priority = false } = {}) {
+  function submit(job, { priority = false, abort = true } = {}) {
     if (inflight || pending) stats.coalesced += 1;
     pending = job;
-    if (priority && currentAbort) currentAbort.abort();
+    // Abort only when the caller asks. A stop that aborts a move still
+    // in flight drops that move on a slow link, so the joint never starts.
+    if (priority && abort && currentAbort) currentAbort.abort();
     pump();
   }
 
